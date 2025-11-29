@@ -15,9 +15,8 @@ import (
 // GenerateExcelReport creates an Excel report from Jira issues and saves it to a file.
 func GenerateExcelReport(config *config.Config, issues []jira.Issue) error {
 	movingAvgWeeks := config.MovingAvgWeeks
-	if movingAvgWeeks == 0 {
-		movingAvgWeeks = 12
-	}
+
+	// Create a new Excel file
 	f := excelize.NewFile()
 
 	// Create first sheet: Issues with weekly progress data
@@ -189,10 +188,10 @@ func GenerateExcelReport(config *config.Config, issues []jira.Issue) error {
 	if err := f.SetCellValue(projectionsSheet, "D1", "Velocity"); err != nil {
 		return errors.WithStack(err)
 	}
-	if err := f.SetCellValue(projectionsSheet, "E1", "Avg (12w)"); err != nil {
+	if err := f.SetCellValue(projectionsSheet, "E1", fmt.Sprintf("Avg (%dw)", movingAvgWeeks)); err != nil {
 		return errors.WithStack(err)
 	}
-	if err := f.SetCellValue(projectionsSheet, "F1", "StdDev (12w)"); err != nil {
+	if err := f.SetCellValue(projectionsSheet, "F1", fmt.Sprintf("StdDev (%dw)", movingAvgWeeks)); err != nil {
 		return errors.WithStack(err)
 	}
 	if err := f.SetCellValue(projectionsSheet, "G1", "Fast (p68)"); err != nil {
