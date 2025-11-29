@@ -1,0 +1,14 @@
+{
+  "jql": "project = \"YOUR_PROJECT\" AND type = Story",
+  "output_file": "burndown.xlsx",
+  "start_date": "2025-01-01",
+  "moving_avg_weeks": 12,
+  "jira": {
+    "jira_url": "https://yourcompany.atlassian.net",
+    "username": "your.email@company.com",
+    "api_token": "your_jira_api_token_here",
+    "size_field": "customfield_10028",
+    "percent_complete_field": "Percentage Complete",
+    "done_statuses": ["Done", "Closed", "Resolved", "Complete", "Completed"]
+  }
+}

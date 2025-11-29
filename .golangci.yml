@@ -1,0 +1,101 @@
+run:
+  timeout: 5m
+  issues-exit-code: 1
+  tests: true
+
+output:
+  formats:
+    - format: colored-line-number
+  print-issued-lines: true
+  print-linter-name: true
+
+linters-settings:
+  golint:
+    min-confidence: 0
+  maligned:
+    suggest-new: true
+  dupl:
+    threshold: 100
+  goconst:
+    min-len: 2
+    min-occurrences: 2
+  misspell:
+    locale: US
+  goimports:
+    local-prefixes: go-burndown
+  gocritic:
+    enabled-tags:
+      - diagnostic
+      - experimental
+      - opinionated
+      - performance
+      - style
+    disabled-checks:
+      - dupImport # https://github.com/go-critic/go-critic/issues/845
+      - ifElseChain
+      - octalLiteral
+      - whyNoLint
+      - wrapperFunc
+  revive:
+    rules:
+      - name: exported
+        severity: warning
+        disabled: false
+      - name: package-comments
+        severity: warning
+        disabled: false
+
+linters:
+  disable-all: true
+  enable:
+    - bodyclose
+    - dogsled
+    - dupl
+    - exhaustive
+    - errcheck
+    - gochecknoinits
+    - goconst
+    - gocritic
+    - godot
+    - gofmt
+    - goimports
+    - goprintffuncname
+    - gosimple
+    - govet
+    - ineffassign
+    - misspell
+    - nakedret
+    - noctx
+    - nolintlint
+    - revive
+    - rowserrcheck
+    - staticcheck
+    - stylecheck
+    - thelper
+    - tparallel
+    - typecheck
+    - unconvert
+    - unparam
+    - unused
+    - whitespace
+
+issues:
+  exclude-rules:
+    - path: _test\.go
+      linters:
+        - gomnd
+        - gocyclo
+        - errcheck
+        - dupl
+        - gosec
+
+  exclude-use-default: false
+  exclude:
+    # stylecheck: Allow abberviations to not be all uppercase.
+    - ST1003
+    # whitespace: allow a blank line after a function starts.
+    - unnecessary leading newline
+
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  new: false
