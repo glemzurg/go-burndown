@@ -135,7 +135,6 @@ func GenerateExcelReport(config *config.Config, issues []jira.Issue) error {
 		// Weekly data - loop over reversedWeeks to match header order
 		col := 7 // Start after Size column (F)
 		for _, weekDate := range reversedWeeks {
-
 			// Get percent complete for this issue at this week date
 			percentComplete, err := issue.PercentCompleteOnDate(config, weekDate)
 			if err != nil {

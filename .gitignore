@@ -35,3 +35,6 @@ go.work.sum
 config.json
 ./burndown
 build/
+
+# Ignore macOS system files
+.DS_Store

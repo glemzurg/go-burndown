@@ -22,7 +22,6 @@ type Issue struct {
 }
 
 func getIssueDetails(ctx context.Context, client *http.Client, auth, jiraURL, issueKey string) (*Issue, error) {
-
 	// Build URL for individual issue with changelog
 	issueURL := fmt.Sprintf("%s/rest/api/3/issue/%s?expand=changelog", jiraURL, issueKey)
 

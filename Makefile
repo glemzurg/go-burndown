@@ -1,4 +1,10 @@
-.PHONY: build test clean lint fmt
+.PHONY: prereq build test clean lint fmt
+
+# Check that all prerequisites are met
+prereq:
+	which go
+	which golangci-lint
+	which goimports
 
 # Build the application
 build:
@@ -31,4 +37,4 @@ deps:
 	go mod tidy
 
 # All checks
-check: fmt lint test build
+check: prereq fmt lint test build

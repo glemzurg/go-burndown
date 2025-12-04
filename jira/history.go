@@ -13,6 +13,7 @@ import (
 )
 
 const (
+	//revive:disable:var-naming
 	_JIRA_RFC3339_TIME_LAYOUT = `2006-01-02T15:04:05.000-0700`
 )
 
@@ -30,7 +31,6 @@ type History struct {
 }
 
 func (issue *Issue) parseHistoryTimes() (err error) {
-
 	// Gater updated histories with a parsed times.
 	var updatedHistories []History
 	for _, history := range issue.Changelog.Histories {
@@ -55,7 +55,6 @@ func (issue *Issue) parseHistoryTimes() (err error) {
 
 // PercentCompleteOnDate returns the percent complete for an issue at a given date. Percent complete is 0.0 (0%) to 1.0 (100%).
 func (issue *Issue) PercentCompleteOnDate(config *config.Config, date time.Time) (percentComplete float64, err error) {
-
 	// Build up the percent to this date.
 	percentComplete = 0.0
 	// We want to capture everything that happens on that date or before.
@@ -65,9 +64,7 @@ func (issue *Issue) PercentCompleteOnDate(config *config.Config, date time.Time)
 		historyTime := history.createdTime
 		if historyTime.Before(beginningOfNextDay) {
 			for _, item := range history.Items {
-
 				switch item.Field {
-
 				case config.Jira.PercentCompleteField:
 					val, err := strconv.ParseFloat(item.ToString, 64)
 					if err != nil {
