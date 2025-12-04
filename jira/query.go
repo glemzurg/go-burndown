@@ -17,6 +17,7 @@ import (
 
 const (
 	// When querying jira, how many results to request per page.
+	//revive:disable:var-naming
 	_RESULTS_PER_PAGE = 100
 )
 

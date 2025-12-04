@@ -58,6 +58,8 @@ func (c *Config) Validate() error {
 }
 
 // TicketUrl creates the URL to a specific ticket.
+//
+//revive:disable:var-naming
 func (c *Config) TicketUrl(ticketId string) (url string) {
 	return c.Jira.JiraURL + "/browse/" + ticketId
 }
