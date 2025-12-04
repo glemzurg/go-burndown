@@ -33,5 +33,5 @@ go.work.sum
 
 # Files specific to thie repo. 
 config.json
-burndown
+./burndown
 build/
