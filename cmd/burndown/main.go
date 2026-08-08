@@ -24,72 +24,86 @@ func main() {
 	jql := flag.String("jql", "", "JQL query")
 	outputFile := flag.String("output", "", "Output Excel file")
 	startDate := flag.String("start-date", "", "Project start date (YYYY-MM-DD)")
-	example := flag.Bool("example", false, "Create example spreadsheet with mock data")
+	example := flag.Bool("example", false, "Create example spreadsheet with mock data (no config file required)")
 	flag.Parse()
 
-	// Set defaults if flags are empty
-	configFilePath := *configFile
-	if configFilePath == "" {
-		configFilePath = "config.json"
-	}
+	var cfg config.Config
+	var err error
 
-	config, err := config.LoadConfig(configFilePath)
-	if err != nil {
-		log.Fatalf("Config loading error: %+v", err)
-	}
+	if *example {
+		// Demo mode is fully self-contained: no config.json, no Jira credentials.
+		cfg = exampleConfig(time.Now())
+		if *outputFile != "" {
+			cfg.OutputFile = *outputFile
+		}
+		if *startDate != "" {
+			cfg.StartDate = *startDate
+		}
+	} else {
+		configFilePath := *configFile
+		if configFilePath == "" {
+			configFilePath = "config.json"
+		}
 
-	// Override config with command line flags if provided
-	if *jql != "" {
-		config.JQL = *jql
-	}
-	if *outputFile != "" {
-		config.OutputFile = *outputFile
-	}
-	if *startDate != "" {
-		config.StartDate = *startDate
-	}
+		cfg, err = config.LoadConfig(configFilePath)
+		if err != nil {
+			log.Fatalf("Config loading error: %+v", err)
+		}
 
-	// Example mode owns its timeline: no config start_date required. Start is
-	// six weeks before the last Tuesday on or before now (overridable with --start-date).
-	if *example && *startDate == "" {
-		config.StartDate = exampleStartDate(time.Now()).Format("2006-01-02")
-	}
+		if *jql != "" {
+			cfg.JQL = *jql
+		}
+		if *outputFile != "" {
+			cfg.OutputFile = *outputFile
+		}
+		if *startDate != "" {
+			cfg.StartDate = *startDate
+		}
 
-	// Validate configuration
-	if err := config.Validate(); err != nil {
-		log.Fatalf("Configuration error: %+v", err)
+		if err := cfg.Validate(); err != nil {
+			log.Fatalf("Configuration error: %+v", err)
+		}
 	}
-
-	// Create context for HTTP requests
-	ctx := context.Background()
 
 	var issues []jira.Issue
 
 	if *example {
-		// Create example data instead of querying Jira
-		var err error
-		issues, err = createExampleIssues(&config)
+		issues, err = createExampleIssues(&cfg)
 		if err != nil {
 			log.Fatalf("Failed to create example issues: %+v", err)
 		}
 	} else {
-		// Query Jira
-		var err error
-		issues, err = jira.QueryJira(ctx, &config)
+		issues, err = jira.QueryJira(context.Background(), &cfg)
 		if err != nil {
 			wrappedErr := errors.Wrap(err, "failed to query Jira")
 			log.Fatalf("Jira query error: %+v", wrappedErr)
 		}
 	}
 
-	// Generate Excel report
-	err = excel.GenerateExcelReport(&config, issues)
-	if err != nil {
+	if err := excel.GenerateExcelReport(&cfg, issues); err != nil {
 		wrappedErr := errors.Wrap(err, "failed to generate Excel report")
 		log.Fatalf("Excel generation error: %+v", wrappedErr)
 	}
 
-	fmt.Printf("Burndown report generated: %s\n", config.OutputFile)
+	fmt.Printf("Burndown report generated: %s\n", cfg.OutputFile)
+}
+
+// exampleConfig returns built-in settings for --example (no config file or Jira access).
+func exampleConfig(now time.Time) config.Config {
+	return config.Config{
+		OutputFile:     "burndown.xlsx",
+		StartDate:      exampleStartDate(now).Format("2006-01-02"),
+		JQL:            "example", // unused; issues are generated in-process
+		MovingAvgWeeks: 3,
+		Jira: config.JiraConfig{
+			JiraURL:              "https://example.atlassian.net",
+			Username:             "example@example.com",
+			APIToken:             "example",
+			SizeField:            "customfield_10028",
+			PercentCompleteField: "Percentage Complete",
+			DoneStatuses:         []string{"Done", "Closed", "Resolved", "Complete", "Completed"},
+		},
+	}
 }
 
 // lastTuesdayOnOrBefore returns the most recent Tuesday on or before now (date only).

@@ -68,27 +68,36 @@ go build -o build/burndown ./cmd/burndown
 ```
 
 ### Example Mode
-To generate an example spreadsheet with mock data without requiring Jira access:
+Generate a demo spreadsheet with mock data. **No `config.json`, Jira credentials, or network access required:**
 
 ```bash
+go build -o build/burndown ./cmd/burndown
 ./build/burndown --example
 ```
 
-This creates a spreadsheet with sample project data that demonstrates the tool's output format.
+Writes `burndown.xlsx` by default. Optional overrides:
+
+```bash
+./build/burndown --example --output=demo.xlsx
+./build/burndown --example --start-date=2026-01-06
+```
+
+The demo timeline starts six weeks before the last Tuesday on or before today, with fictional weekly progress history.
 
 ### Command Line Options
 You can override configuration file settings with command-line flags:
 
 ```bash
-./burndown --config="custom.json" --jql="project = MY_PROJECT" --output="report.xlsx" --start-date="2025-01-01" --example
+./burndown --config="custom.json" --jql="project = MY_PROJECT" --output="report.xlsx" --start-date="2025-01-01"
 ```
 
 Available flags:
-- `--config`: Path to configuration file (default: "config.json")
-- `--jql`: JQL query to fetch issues (overrides config)
-- `--output`: Output Excel file path (overrides config)
-- `--start-date`: Project start date in YYYY-MM-DD format (overrides config)
-- `--example`: Create example spreadsheet with mock data instead of querying Jira
+- `--config`: Path to configuration file (default: "config.json"; ignored with `--example`)
+- `--jql`: JQL query to fetch issues (overrides config; unused with `--example`)
+- `--output`: Output Excel file path (overrides config / example default)
+- `--start-date`: Project start date in YYYY-MM-DD format (overrides config / example default)
+- `--example`: Create example spreadsheet with mock data (no config file or Jira required)
+
 
 ## Excel Output
 
