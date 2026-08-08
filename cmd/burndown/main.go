@@ -26,71 +26,69 @@ func main() {
 	outputFile := flag.String("output", "", "Output Excel file")
 	startDate := flag.String("start-date", "", "Project start date (YYYY-MM-DD)")
 	overridesDir := flag.String("overrides-dir", "", "Directory of hand-maintained issue overlay JSON files ({KEY}.json or {KEY}-*.json)")
-	example := flag.Bool("example", false, "Create example spreadsheet with mock data (no config file required)")
+	example := flag.Bool("example", false, "Create example spreadsheet with mock data (no config file or Jira required)")
+	fromOverrides := flag.Bool("from-overrides", false, "Load issues only from overrides-dir (no Jira; file names supply issue keys)")
 	flag.Parse()
+
+	if *example && *fromOverrides {
+		log.Fatal("use only one of --example or --from-overrides")
+	}
 
 	var cfg config.Config
 	var err error
-
-	if *example {
-		// Demo mode is fully self-contained: no config.json, no Jira credentials.
-		cfg = exampleConfig(time.Now())
-		if *outputFile != "" {
-			cfg.OutputFile = *outputFile
-		}
-		if *startDate != "" {
-			cfg.StartDate = *startDate
-		}
-		if *overridesDir != "" {
-			cfg.OverridesDir = *overridesDir
-		}
-	} else {
-		configFilePath := *configFile
-		if configFilePath == "" {
-			configFilePath = "config.json"
-		}
-
-		cfg, err = config.LoadConfig(configFilePath)
-		if err != nil {
-			log.Fatalf("Config loading error: %+v", err)
-		}
-
-		if *jql != "" {
-			cfg.JQL = *jql
-		}
-		if *outputFile != "" {
-			cfg.OutputFile = *outputFile
-		}
-		if *startDate != "" {
-			cfg.StartDate = *startDate
-		}
-		if *overridesDir != "" {
-			cfg.OverridesDir = *overridesDir
-		}
-
-		if err := cfg.Validate(); err != nil {
-			log.Fatalf("Configuration error: %+v", err)
-		}
-	}
-
 	var issues []jira.Issue
 
-	if *example {
+	switch {
+	case *example:
+		// Demo mode: built-in mock tickets; optional overlays on top.
+		cfg = offlineBaseConfig(time.Now())
+		applyCommonFlags(&cfg, outputFile, startDate, overridesDir)
 		issues, err = createExampleIssues(&cfg)
 		if err != nil {
 			log.Fatalf("Failed to create example issues: %+v", err)
 		}
-	} else {
+		if err := override.Apply(cfg.OverridesDir, issues, &cfg); err != nil {
+			log.Fatalf("Local overrides error: %+v", err)
+		}
+
+	case *fromOverrides:
+		// Overrides-only mode: directory is the full issue database; no Jira.
+		cfg = offlineBaseConfig(time.Now())
+		mergeOptionalConfigFile(&cfg, *configFile)
+		applyCommonFlags(&cfg, outputFile, startDate, overridesDir)
+		if cfg.OverridesDir == "" {
+			log.Fatal("--from-overrides requires --overrides-dir (or overrides_dir in config)")
+		}
+		issues, err = override.LoadAll(cfg.OverridesDir, &cfg)
+		if err != nil {
+			log.Fatalf("Load overrides error: %+v", err)
+		}
+
+	default:
+		// Jira mode: query Jira, then optional local overlays.
+		configFilePath := *configFile
+		if configFilePath == "" {
+			configFilePath = "config.json"
+		}
+		cfg, err = config.LoadConfig(configFilePath)
+		if err != nil {
+			log.Fatalf("Config loading error: %+v", err)
+		}
+		if *jql != "" {
+			cfg.JQL = *jql
+		}
+		applyCommonFlags(&cfg, outputFile, startDate, overridesDir)
+		if err := cfg.Validate(); err != nil {
+			log.Fatalf("Configuration error: %+v", err)
+		}
 		issues, err = jira.QueryJira(context.Background(), &cfg)
 		if err != nil {
 			wrappedErr := errors.Wrap(err, "failed to query Jira")
 			log.Fatalf("Jira query error: %+v", wrappedErr)
 		}
-	}
-
-	// Local hand-maintained files overlay Jira (or example) fields and progress history.
-	if err := override.Apply(cfg.OverridesDir, issues, &cfg); err != nil {
-		log.Fatalf("Local overrides error: %+v", err)
+		if err := override.Apply(cfg.OverridesDir, issues, &cfg); err != nil {
+			log.Fatalf("Local overrides error: %+v", err)
+		}
 	}
 
 	if err := excel.GenerateExcelReport(&cfg, issues); err != nil {
@@ -101,17 +99,66 @@ func main() {
 	fmt.Printf("Burndown report generated: %s\n", cfg.OutputFile)
 }
 
-// exampleConfig returns built-in settings for --example (no config file or Jira access).
-func exampleConfig(now time.Time) config.Config {
+func applyCommonFlags(cfg *config.Config, outputFile, startDate, overridesDir *string) {
+	if *outputFile != "" {
+		cfg.OutputFile = *outputFile
+	}
+	if *startDate != "" {
+		cfg.StartDate = *startDate
+	}
+	if *overridesDir != "" {
+		cfg.OverridesDir = *overridesDir
+	}
+}
+
+// mergeOptionalConfigFile copies generation-related fields from a config file when present.
+// Used by offline modes so start_date / field names can come from config without Jira credentials.
+func mergeOptionalConfigFile(cfg *config.Config, configPath string) {
+	path := configPath
+	if path == "" {
+		path = "config.json"
+	}
+	loaded, err := config.LoadConfig(path)
+	if err != nil {
+		return
+	}
+	if loaded.OutputFile != "" {
+		cfg.OutputFile = loaded.OutputFile
+	}
+	if loaded.StartDate != "" {
+		cfg.StartDate = loaded.StartDate
+	}
+	if loaded.MovingAvgWeeks != 0 {
+		cfg.MovingAvgWeeks = loaded.MovingAvgWeeks
+	}
+	if loaded.OverridesDir != "" {
+		cfg.OverridesDir = loaded.OverridesDir
+	}
+	if loaded.Jira.JiraURL != "" {
+		cfg.Jira.JiraURL = loaded.Jira.JiraURL
+	}
+	if loaded.Jira.SizeField != "" {
+		cfg.Jira.SizeField = loaded.Jira.SizeField
+	}
+	if loaded.Jira.PercentCompleteField != "" {
+		cfg.Jira.PercentCompleteField = loaded.Jira.PercentCompleteField
+	}
+	if len(loaded.Jira.DoneStatuses) > 0 {
+		cfg.Jira.DoneStatuses = loaded.Jira.DoneStatuses
+	}
+}
+
+// offlineBaseConfig is used for --example and --from-overrides (no Jira connection).
+func offlineBaseConfig(now time.Time) config.Config {
 	return config.Config{
 		OutputFile:     "burndown.xlsx",
 		StartDate:      exampleStartDate(now).Format("2006-01-02"),
-		JQL:            "example", // unused; issues are generated in-process
+		JQL:            "offline",
 		MovingAvgWeeks: 3,
 		Jira: config.JiraConfig{
 			JiraURL:              "https://example.atlassian.net",
-			Username:             "example@example.com",
-			APIToken:             "example",
+			Username:             "offline@example.com",
+			APIToken:             "offline",
 			SizeField:            "customfield_10028",
 			PercentCompleteField: "Percentage Complete",
 			DoneStatuses:         []string{"Done", "Closed", "Resolved", "Complete", "Completed"},

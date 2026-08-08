@@ -60,76 +60,92 @@ Create a `config.json` file or use command-line parameters:
 
 ## Usage
 
-### Basic Usage (with config.json)
-```bash
-./burndown
-```
+There are **three ways** to generate a burndown:
 
-### Build and Run
+| Mode | Flag(s) | Data source | Jira? |
+|------|---------|-------------|-------|
+| **Jira** | (default, needs `config.json`) | Jira JQL, then optional local files | Yes |
+| **Overrides only** | `--from-overrides --overrides-dir=…` | Local JSON files only (keys from filenames) | No |
+| **Example** | `--example` | Built-in mock tickets (+ optional overlays) | No |
+
+### Build
 ```bash
 go build -o build/burndown ./cmd/burndown
+```
+
+### 1. Jira mode (optional local overlays)
+Requires `config.json` with Jira credentials and JQL:
+
+```bash
 ./build/burndown
+./build/burndown --overrides-dir=overrides
+./build/burndown --config=custom.json --jql='project = MY_PROJECT' --output=report.xlsx
 ```
 
-### Example Mode
-Generate a demo spreadsheet with mock data. **No `config.json`, Jira credentials, or network access required:**
+### 2. Overrides-only mode (no Jira)
+Treat a folder of hand-maintained JSON files as the full issue database. Issue keys come from the **start of each filename** (`PROJ-123.json` or `PROJ-123-description.json`).
 
 ```bash
-go build -o build/burndown ./cmd/burndown
+./build/burndown --from-overrides --overrides-dir=example/overrides
+./build/burndown --from-overrides --overrides-dir=overrides --start-date=2026-06-01 --output=local.xlsx
+```
+
+No Jira credentials or network access. Optional `config.json` may still supply `start_date`, `moving_avg_weeks`, field names, and `done_statuses` if present; flags win when set. `--overrides-dir` (or `overrides_dir` in config) is required.
+
+### 3. Example mode
+Built-in mock project data (no config file or Jira):
+
+```bash
 ./build/burndown --example
-```
-
-Writes `burndown.xlsx` by default. Optional overrides:
-
-```bash
-./build/burndown --example --output=demo.xlsx
-./build/burndown --example --start-date=2026-01-06
+./build/burndown --example --output=demo.xlsx --start-date=2026-01-06
+./build/burndown --example --overrides-dir=example/overrides
 ```
 
 The demo timeline starts six weeks before the last Tuesday on or before today, with fictional weekly progress history.
 
-You can still apply local overlays in example mode:
-
-```bash
-./build/burndown --example --overrides-dir=example/overrides
-```
-
 ### Command Line Options
-You can override configuration file settings with command-line flags:
 
 ```bash
 ./burndown --config="custom.json" --jql="project = MY_PROJECT" --output="report.xlsx" --start-date="2025-01-01" --overrides-dir=overrides
 ```
 
 Available flags:
-- `--config`: Path to configuration file (default: "config.json"; ignored with `--example`)
-- `--jql`: JQL query to fetch issues (overrides config; unused with `--example`)
-- `--output`: Output Excel file path (overrides config / example default)
-- `--start-date`: Project start date in YYYY-MM-DD format (overrides config / example default)
-- `--overrides-dir`: Folder of hand-maintained issue overlay JSON files (overrides config `overrides_dir`)
-- `--example`: Create example spreadsheet with mock data (no config file or Jira required)
+- `--config`: Path to configuration file (default: `config.json` in Jira mode; optional offline merge for `--from-overrides`)
+- `--jql`: JQL query to fetch issues (Jira mode only)
+- `--output`: Output Excel file path
+- `--start-date`: Project start date in YYYY-MM-DD format
+- `--overrides-dir`: Folder of issue JSON files (overlay in Jira/example modes; **source of truth** with `--from-overrides`)
+- `--from-overrides`: Load issues only from `--overrides-dir` (no Jira)
+- `--example`: Built-in mock data (no config file or Jira; mutually exclusive with `--from-overrides`)
 
-## Pipeline: Jira → local overlays → Excel
+## Pipelines
 
-Normal generation runs in three steps:
+### Jira (+ optional overlays)
+1. **Fetch from Jira** — JQL loads issues with changelog history.
+2. **Apply local overlays** — Merge matching files from `overrides_dir` when set.
+3. **Generate Excel**.
 
-1. **Fetch from Jira** — JQL loads issues with changelog history (percent complete, status, etc.).
-2. **Apply local overlays** — For each issue key, merge any matching files in `overrides_dir` (see naming below).
-3. **Generate Excel** — Build the Work and Projections sheets from the merged issue set.
+### Overrides only (`--from-overrides`)
+1. **Load all matching JSON files** from `overrides_dir` as issues (key = filename prefix).
+2. **Generate Excel** (same engine as Jira mode).
 
-Example mode skips step 1 (mock issues in process) but still runs step 2 when an overrides directory is set.
+### Example (`--example`)
+1. **Build mock issues** in process.
+2. **Optional overlays** from `overrides_dir`.
+3. **Generate Excel**.
 
-### Local overlay files
+### Local issue files
 
 | Rule | Detail |
 |------|--------|
-| Location | Directory from `overrides_dir` in config or `--overrides-dir` |
+| Location | Directory from `overrides_dir` / `--overrides-dir` |
 | Filename | `{ISSUE_KEY}.json` **or** `{ISSUE_KEY}-*.json` (optional descriptive suffix after a hyphen) |
-| Examples | `PROJ-123.json`, `PROJ-123-Big Ticket To Do.json`, `TICKET-1236-Big work stuff.json` |
-| Matching | Filename must start with the full issue key; a longer key is not a match (`PROJ-1230.json` does not apply to `PROJ-123`) |
-| Multiple files | If several files match one key, they are applied in sorted filename order |
-| Scope | Only issues already present from Jira (or example data) are updated; orphan JSON files are ignored |
-| Missing file | No change for that issue |
+| Issue key | Leading `PROJECT-123` style id at the start of the filename (`TICKET-1236-Big work stuff.json` → `TICKET-1236`) |
+| Examples | `PROJ-123.json`, `PROJ-123-Big Ticket To Do.json` |
+| Matching (Jira/example overlay) | File applies only to that issue key; `PROJ-1230.json` does not match `PROJ-123` |
+| Multiple files | Same key: applied in sorted filename order |
+| Orphan files (Jira/example) | JSON for keys not in the issue set is ignored |
+| Overrides-only mode | Every matching file becomes an issue; non-matching names (e.g. `notes.json`) are skipped |
 
 ### Overlay JSON shape
 

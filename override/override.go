@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -15,6 +16,10 @@ import (
 
 	"github.com/pkg/errors"
 )
+
+// issueKeyFilenameRE extracts a Jira-style key (PROJECT-123) from the start of a filename base.
+// Optional descriptive suffix after a hyphen is allowed: PROJ-123-Big Ticket.json → PROJ-123.
+var issueKeyFilenameRE = regexp.MustCompile(`^([A-Za-z][A-Za-z0-9]*-\d+)(?:-.*)?$`)
 
 // IssueFile is the on-disk shape for one issue overlay JSON file.
 // Omitted or empty optional fields leave the Jira value unchanged.
@@ -73,13 +78,98 @@ func Apply(dir string, issues []jira.Issue, cfg *config.Config) error {
 	return nil
 }
 
-// matchesIssueOverrideFile reports whether name is an overlay for issueKey.
-func matchesIssueOverrideFile(name, issueKey string) bool {
+// issueKeyFromFilename returns the issue key from an overlay filename, if it follows
+// {KEY}.json or {KEY}-*.json where KEY is PROJECT-123 style.
+func issueKeyFromFilename(name string) (string, bool) {
 	if !strings.HasSuffix(name, ".json") {
-		return false
+		return "", false
 	}
 	base := strings.TrimSuffix(name, ".json")
-	return base == issueKey || strings.HasPrefix(base, issueKey+"-")
+	m := issueKeyFilenameRE.FindStringSubmatch(base)
+	if m == nil {
+		return "", false
+	}
+	return m[1], true
+}
+
+// matchesIssueOverrideFile reports whether name is an overlay for issueKey.
+func matchesIssueOverrideFile(name, issueKey string) bool {
+	key, ok := issueKeyFromFilename(name)
+	return ok && key == issueKey
+}
+
+// LoadAll builds issues solely from overlay JSON files in dir (no Jira).
+// Each file whose name starts with a PROJECT-123 style key becomes (or merges into)
+// that issue. Multiple files for the same key are applied in sorted filename order.
+// Files that do not match the naming convention are skipped.
+func LoadAll(dir string, cfg *config.Config) ([]jira.Issue, error) {
+	if dir == "" {
+		return nil, errors.New("overrides directory is required")
+	}
+	info, err := os.Stat(dir)
+	if err != nil {
+		return nil, errors.Wrapf(err, "overrides directory %q", dir)
+	}
+	if !info.IsDir() {
+		return nil, errors.Errorf("overrides path is not a directory: %s", dir)
+	}
+
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, errors.Wrapf(err, "read overrides directory %s", dir)
+	}
+
+	// key → sorted file paths
+	filesByKey := make(map[string][]string)
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		key, ok := issueKeyFromFilename(name)
+		if !ok {
+			continue
+		}
+		filesByKey[key] = append(filesByKey[key], filepath.Join(dir, name))
+	}
+	if len(filesByKey) == 0 {
+		return nil, errors.Errorf("no issue overlay JSON files found in %s (want KEY.json or KEY-description.json)", dir)
+	}
+
+	keys := make([]string, 0, len(filesByKey))
+	for key := range filesByKey {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+
+	issues := make([]jira.Issue, 0, len(keys))
+	for _, key := range keys {
+		paths := filesByKey[key]
+		sort.Strings(paths)
+		issue := newBlankIssue(key)
+		for _, path := range paths {
+			if err := applyFile(path, &issue, cfg); err != nil {
+				return nil, err
+			}
+		}
+		issues = append(issues, issue)
+	}
+	return issues, nil
+}
+
+func newBlankIssue(key string) jira.Issue {
+	return jira.Issue{
+		Key: key,
+		Fields: jira.Fields{
+			Status: struct {
+				Name string `json:"name"`
+			}{Name: "To Do"},
+			Issuetype: struct {
+				Name string `json:"name"`
+			}{Name: "Task"},
+			CustomFields: make(map[string]interface{}),
+		},
+	}
 }
 
 func listOverrideFiles(dir, issueKey string) ([]string, error) {

@@ -250,3 +250,58 @@ func TestMatchesIssueOverrideFile(t *testing.T) {
 		})
 	}
 }
+
+func TestIssueKeyFromFilename(t *testing.T) {
+	tests := []struct {
+		name    string
+		wantKey string
+		wantOK  bool
+	}{
+		{name: "TICKET-1236.json", wantKey: "TICKET-1236", wantOK: true},
+		{name: "TICKET-1236-Big work stuff.json", wantKey: "TICKET-1236", wantOK: true},
+		{name: "PROJ-1-notes.json", wantKey: "PROJ-1", wantOK: true},
+		{name: "readme.json", wantOK: false},
+		{name: "TICKET-1236.txt", wantOK: false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			key, ok := issueKeyFromFilename(tc.name)
+			assert.Equal(t, tc.wantOK, ok)
+			if tc.wantOK {
+				assert.Equal(t, tc.wantKey, key)
+			}
+		})
+	}
+}
+
+func TestLoadAll_FromDirectory(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "AAA-1.json"), []byte(`{
+		"summary": "First",
+		"size": 2,
+		"progress": [{"date": "2026-01-10", "percent_complete": 0.5}],
+		"statuses": [{"date": "2026-01-10", "status": "In Progress"}]
+	}`), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "BBB-2-Descriptive Name.json"), []byte(`{
+		"summary": "Second",
+		"type": "Bug",
+		"assignee": "Pat",
+		"size": 5,
+		"statuses": [{"date": "2026-01-01", "status": "To Do"}]
+	}`), 0o644))
+	// Non-matching name is skipped.
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "notes.json"), []byte(`{"summary":"ignored"}`), 0o644))
+
+	cfg := testConfig()
+	issues, err := LoadAll(dir, cfg)
+	require.NoError(t, err)
+	require.Len(t, issues, 2)
+	assert.Equal(t, "AAA-1", issues[0].Key)
+	assert.Equal(t, "First", issues[0].Fields.Summary)
+	assert.Equal(t, float64(2), issues[0].GetSize(cfg))
+	assert.Equal(t, "In Progress", issues[0].GetStatus())
+	assert.Equal(t, "BBB-2", issues[1].Key)
+	assert.Equal(t, "Second", issues[1].Fields.Summary)
+	assert.Equal(t, "Bug", issues[1].GetType())
+	assert.Equal(t, "Pat", issues[1].Fields.Assignee.DisplayName)
+}
