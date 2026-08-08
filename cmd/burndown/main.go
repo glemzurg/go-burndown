@@ -117,7 +117,10 @@ func createExampleIssues(config *config.Config) ([]jira.Issue, error) {
 
 	// progressByWeek[i] is percent complete (0.0–1.0) on startDate + i weeks.
 	// Seven samples cover start .. start+6w (last Tuesday when start is computed by exampleStartDate).
-	// Trajectories: gradual finish, early done, slow ramp, big jump, late start, untouched.
+	//
+	// Shaped so weekly velocity has one early spike (ticket finished in week 1) then a
+	// steadier pace: the first Slow (p90) CI week can show "unknown" (lower bound ≤ 0),
+	// while later weeks have positive V. Slow for real pessimistic dates.
 	exampleData := []struct {
 		key            string
 		summary        string
@@ -132,14 +135,15 @@ func createExampleIssues(config *config.Config) ([]jira.Issue, error) {
 			issueType:      "Task",
 			assignee:       "Alice",
 			size:           1,
-			progressByWeek: []float64{0.1, 0.2, 0.4, 0.6, 0.8, 0.9, 1.0},
+			progressByWeek: []float64{0.2, 0.5, 0.65, 0.75, 0.85, 0.95, 1.0},
 		},
 		{
-			key:            "TICKET-1235",
-			summary:        "More work stuff",
-			issueType:      "Bug",
-			assignee:       "Bob",
-			size:           2,
+			key:       "TICKET-1235",
+			summary:   "More work stuff",
+			issueType: "Bug",
+			assignee:  "Bob",
+			size:      2,
+			// Early finish creates the first-week velocity spike (wide early CI).
 			progressByWeek: []float64{0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0},
 		},
 		{
@@ -148,15 +152,16 @@ func createExampleIssues(config *config.Config) ([]jira.Issue, error) {
 			issueType:      "Story",
 			assignee:       "Carol",
 			size:           3,
-			progressByWeek: []float64{0, 0, 0.1, 0.15, 0.2, 0.25, 0.3},
+			progressByWeek: []float64{0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6},
 		},
 		{
-			key:            "TICKET-1237",
-			summary:        "Tall work stuff",
-			issueType:      "Story",
-			assignee:       "Bob",
-			size:           5,
-			progressByWeek: []float64{0, 0, 0, 0, 1.0, 1.0, 1.0},
+			key:       "TICKET-1237",
+			summary:   "Tall work stuff",
+			issueType: "Story",
+			assignee:  "Bob",
+			size:      5,
+			// Steady ramp (no one-week jump) keeps later velocity variance low.
+			progressByWeek: []float64{0, 0.1, 0.2, 0.3, 0.42, 0.52, 0.62},
 		},
 		{
 			key:            "TICKET-1238",
@@ -164,7 +169,7 @@ func createExampleIssues(config *config.Config) ([]jira.Issue, error) {
 			issueType:      "Task",
 			assignee:       "Alice",
 			size:           8,
-			progressByWeek: []float64{0, 0, 0, 0, 0, 0, 0.3},
+			progressByWeek: []float64{0, 0.05, 0.1, 0.16, 0.22, 0.28, 0.35},
 		},
 		{
 			key:            "TICKET-1239",
