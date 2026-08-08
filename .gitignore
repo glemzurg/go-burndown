@@ -41,4 +41,5 @@ build/
 .DS_Store
 
 # Test builds.
+.~lock.burndown.xlsx#
 burndown.xlsx
