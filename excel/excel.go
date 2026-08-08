@@ -310,9 +310,13 @@ func GenerateExcelReport(config *config.Config, issues []jira.Issue) error {
 				return errors.WithStack(err)
 			}
 
-			// Slow projection).
+			// Slow projection: if the lower CI velocity is <= 0, a finish date is not
+			// meaningful (leave V. Slow as-is; show "unknown" here instead of WORKDAY).
 			slowProjectionCell := fmt.Sprintf("I%d", rowNum)
-			slowProjectionFormula := fmt.Sprintf(`=WORKDAY(%s, CEILING((%s/%s)*5, 1))`, dateCell, remainingCell, slowVelocityCell)
+			slowProjectionFormula := fmt.Sprintf(
+				`=IF(%s<=0,"unknown",WORKDAY(%s,CEILING((%s/%s)*5,1)))`,
+				slowVelocityCell, dateCell, remainingCell, slowVelocityCell,
+			)
 			if err := f.SetCellFormula(projectionsSheet, slowProjectionCell, slowProjectionFormula); err != nil {
 				return errors.WithStack(err)
 			}
