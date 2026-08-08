@@ -62,11 +62,11 @@ Create a `config.json` file or use command-line parameters:
 
 There are **three ways** to generate a burndown:
 
-| Mode | Flag(s) | Data source | Jira? |
-|------|---------|-------------|-------|
-| **Jira** | (default, needs `config.json`) | Jira JQL, then optional local files | Yes |
-| **Overrides only** | `--from-overrides --overrides-dir=…` | Local JSON files only (keys from filenames) | No |
-| **Example** | `--example` | Built-in mock tickets (+ optional overlays) | No |
+| Mode | Flag(s) | Config file? | Data source | Jira API? |
+|------|---------|--------------|-------------|-----------|
+| **Jira** | (default) | **Required** (`config.json`) | Jira JQL, then optional local files | Yes |
+| **Overrides only** | `--from-overrides` | **Required** (`config.json` with `overrides_dir`) | Local JSON files only (keys from filenames) | No |
+| **Example** | `--example` | **Not needed** | Built-in mock tickets (+ optional overlays) | No |
 
 ### Build
 ```bash
@@ -82,18 +82,18 @@ Requires `config.json` with Jira credentials and JQL:
 ./build/burndown --config=custom.json --jql='project = MY_PROJECT' --output=report.xlsx
 ```
 
-### 2. Overrides-only mode (no Jira)
-Treat a folder of hand-maintained JSON files as the full issue database. Issue keys come from the **start of each filename** (`PROJ-123.json` or `PROJ-123-description.json`).
+### 2. Overrides-only mode (no Jira API)
+Treat a folder of hand-maintained JSON files as the full issue database. **Requires `config.json`** (start date, field names, `overrides_dir`, etc.) but **not** Jira credentials or network access. Issue keys come from the **start of each filename**.
 
 ```bash
-./build/burndown --from-overrides --overrides-dir=example/overrides
-./build/burndown --from-overrides --overrides-dir=overrides --start-date=2026-06-01 --output=local.xlsx
+./build/burndown --from-overrides
+./build/burndown --from-overrides --config=custom.json --overrides-dir=example/overrides --output=local.xlsx
 ```
 
-No Jira credentials or network access. Optional `config.json` may still supply `start_date`, `moving_avg_weeks`, field names, and `done_statuses` if present; flags win when set. `--overrides-dir` (or `overrides_dir` in config) is required.
+`overrides_dir` must be set in config or via `--overrides-dir`. JQL / username / API token are not required for this mode.
 
 ### 3. Example mode
-Built-in mock project data (no config file or Jira):
+Built-in mock project data — **no config file**, no Jira:
 
 ```bash
 ./build/burndown --example
@@ -110,12 +110,12 @@ The demo timeline starts six weeks before the last Tuesday on or before today, w
 ```
 
 Available flags:
-- `--config`: Path to configuration file (default: `config.json` in Jira mode; optional offline merge for `--from-overrides`)
+- `--config`: Path to configuration file (default: `config.json`; **required** for Jira and `--from-overrides`; ignored by `--example`)
 - `--jql`: JQL query to fetch issues (Jira mode only)
 - `--output`: Output Excel file path
 - `--start-date`: Project start date in YYYY-MM-DD format
 - `--overrides-dir`: Folder of issue JSON files (overlay in Jira/example modes; **source of truth** with `--from-overrides`)
-- `--from-overrides`: Load issues only from `--overrides-dir` (no Jira)
+- `--from-overrides`: Load issues only from `overrides_dir` (config required; no Jira API)
 - `--example`: Built-in mock data (no config file or Jira; mutually exclusive with `--from-overrides`)
 
 ## Pipelines

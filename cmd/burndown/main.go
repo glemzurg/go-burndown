@@ -40,8 +40,8 @@ func main() {
 
 	switch {
 	case *example:
-		// Demo mode: built-in mock tickets; optional overlays on top.
-		cfg = offlineBaseConfig(time.Now())
+		// Demo mode: no config file; built-in mock tickets; optional overlays on top.
+		cfg = exampleBaseConfig(time.Now())
 		applyCommonFlags(&cfg, outputFile, startDate, overridesDir)
 		issues, err = createExampleIssues(&cfg)
 		if err != nil {
@@ -52,12 +52,14 @@ func main() {
 		}
 
 	case *fromOverrides:
-		// Overrides-only mode: directory is the full issue database; no Jira.
-		cfg = offlineBaseConfig(time.Now())
-		mergeOptionalConfigFile(&cfg, *configFile)
+		// Overrides-only mode: config required; issues load from overrides_dir; no Jira API.
+		cfg, err = loadConfigFile(*configFile)
+		if err != nil {
+			log.Fatalf("Config loading error: %+v", err)
+		}
 		applyCommonFlags(&cfg, outputFile, startDate, overridesDir)
-		if cfg.OverridesDir == "" {
-			log.Fatal("--from-overrides requires --overrides-dir (or overrides_dir in config)")
+		if err := cfg.ValidateFromOverrides(); err != nil {
+			log.Fatalf("Configuration error: %+v", err)
 		}
 		issues, err = override.LoadAll(cfg.OverridesDir, &cfg)
 		if err != nil {
@@ -65,12 +67,8 @@ func main() {
 		}
 
 	default:
-		// Jira mode: query Jira, then optional local overlays.
-		configFilePath := *configFile
-		if configFilePath == "" {
-			configFilePath = "config.json"
-		}
-		cfg, err = config.LoadConfig(configFilePath)
+		// Jira mode: config required; query Jira, then optional local overlays.
+		cfg, err = loadConfigFile(*configFile)
 		if err != nil {
 			log.Fatalf("Config loading error: %+v", err)
 		}
@@ -99,6 +97,13 @@ func main() {
 	fmt.Printf("Burndown report generated: %s\n", cfg.OutputFile)
 }
 
+func loadConfigFile(configPath string) (config.Config, error) {
+	if configPath == "" {
+		configPath = "config.json"
+	}
+	return config.LoadConfig(configPath)
+}
+
 func applyCommonFlags(cfg *config.Config, outputFile, startDate, overridesDir *string) {
 	if *outputFile != "" {
 		cfg.OutputFile = *outputFile
@@ -111,54 +116,17 @@ func applyCommonFlags(cfg *config.Config, outputFile, startDate, overridesDir *s
 	}
 }
 
-// mergeOptionalConfigFile copies generation-related fields from a config file when present.
-// Used by offline modes so start_date / field names can come from config without Jira credentials.
-func mergeOptionalConfigFile(cfg *config.Config, configPath string) {
-	path := configPath
-	if path == "" {
-		path = "config.json"
-	}
-	loaded, err := config.LoadConfig(path)
-	if err != nil {
-		return
-	}
-	if loaded.OutputFile != "" {
-		cfg.OutputFile = loaded.OutputFile
-	}
-	if loaded.StartDate != "" {
-		cfg.StartDate = loaded.StartDate
-	}
-	if loaded.MovingAvgWeeks != 0 {
-		cfg.MovingAvgWeeks = loaded.MovingAvgWeeks
-	}
-	if loaded.OverridesDir != "" {
-		cfg.OverridesDir = loaded.OverridesDir
-	}
-	if loaded.Jira.JiraURL != "" {
-		cfg.Jira.JiraURL = loaded.Jira.JiraURL
-	}
-	if loaded.Jira.SizeField != "" {
-		cfg.Jira.SizeField = loaded.Jira.SizeField
-	}
-	if loaded.Jira.PercentCompleteField != "" {
-		cfg.Jira.PercentCompleteField = loaded.Jira.PercentCompleteField
-	}
-	if len(loaded.Jira.DoneStatuses) > 0 {
-		cfg.Jira.DoneStatuses = loaded.Jira.DoneStatuses
-	}
-}
-
-// offlineBaseConfig is used for --example and --from-overrides (no Jira connection).
-func offlineBaseConfig(now time.Time) config.Config {
+// exampleBaseConfig is used only for --example (no config file or Jira).
+func exampleBaseConfig(now time.Time) config.Config {
 	return config.Config{
 		OutputFile:     "burndown.xlsx",
 		StartDate:      exampleStartDate(now).Format("2006-01-02"),
-		JQL:            "offline",
+		JQL:            "example",
 		MovingAvgWeeks: 3,
 		Jira: config.JiraConfig{
 			JiraURL:              "https://example.atlassian.net",
-			Username:             "offline@example.com",
-			APIToken:             "offline",
+			Username:             "example@example.com",
+			APIToken:             "example",
 			SizeField:            "customfield_10028",
 			PercentCompleteField: "Percentage Complete",
 			DoneStatuses:         []string{"Done", "Closed", "Resolved", "Complete", "Completed"},

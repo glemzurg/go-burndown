@@ -289,3 +289,29 @@ func TestConfigValidate(t *testing.T) {
 		})
 	}
 }
+
+func TestValidateFromOverrides(t *testing.T) {
+	ok := Config{
+		OutputFile:     "out.xlsx",
+		StartDate:      "2026-01-01",
+		MovingAvgWeeks: 3,
+		OverridesDir:   "overrides",
+		Jira: JiraConfig{
+			SizeField:            "customfield_1",
+			PercentCompleteField: "Percentage Complete",
+			DoneStatuses:         []string{"Done"},
+		},
+	}
+	assert.NoError(t, ok.ValidateFromOverrides())
+
+	// JQL / credentials not required for from-overrides validation.
+	assert.NoError(t, ok.ValidateFromOverrides())
+
+	missingDir := ok
+	missingDir.OverridesDir = ""
+	assert.ErrorContains(t, missingDir.ValidateFromOverrides(), "overrides_dir")
+
+	missingSize := ok
+	missingSize.Jira.SizeField = ""
+	assert.ErrorContains(t, missingSize.ValidateFromOverrides(), "size_field")
+}

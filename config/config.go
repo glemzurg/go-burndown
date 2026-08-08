@@ -50,12 +50,44 @@ func LoadConfig(filename string) (Config, error) {
 	return config, nil
 }
 
-// Validate checks that the configuration has all required fields and valid values.
+// Validate checks that the configuration has all required fields and valid values for Jira mode.
 func (c *Config) Validate() error {
 	validate := validator.New()
 	err := validate.Struct(c)
 	if err != nil {
 		return errors.WithStack(err)
+	}
+	return nil
+}
+
+// ValidateFromOverrides checks fields needed when issues come only from overrides_dir (no Jira API).
+// Requires a config file with report settings and field names, plus a non-empty overrides_dir.
+// Does not require JQL or Jira credentials.
+func (c *Config) ValidateFromOverrides() error {
+	if c.OutputFile == "" {
+		return errors.New("output_file is required")
+	}
+	if c.StartDate == "" {
+		return errors.New("start_date is required")
+	}
+	validate := validator.New()
+	if err := validate.Var(c.StartDate, "datetime=2006-01-02"); err != nil {
+		return errors.Wrap(err, "start_date")
+	}
+	if c.MovingAvgWeeks == 0 {
+		return errors.New("moving_avg_weeks is required")
+	}
+	if c.OverridesDir == "" {
+		return errors.New("overrides_dir is required (or pass --overrides-dir)")
+	}
+	if c.Jira.SizeField == "" {
+		return errors.New("jira.size_field is required")
+	}
+	if c.Jira.PercentCompleteField == "" {
+		return errors.New("jira.percent_complete_field is required")
+	}
+	if len(c.Jira.DoneStatuses) == 0 {
+		return errors.New("jira.done_statuses is required")
 	}
 	return nil
 }
