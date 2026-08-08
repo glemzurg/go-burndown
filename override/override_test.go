@@ -167,6 +167,44 @@ func TestApply_FullFieldOverwrite(t *testing.T) {
 	assert.Equal(t, float64(13), issues[0].GetSize(cfg))
 }
 
+func TestApply_StatusHistoryInterleaved(t *testing.T) {
+	dir := t.TempDir()
+	content := `{
+		"statuses": [
+			{"date": "2026-01-05", "status": "To Do"},
+			{"date": "2026-01-12", "status": "In Progress"},
+			{"date": "2026-01-25", "status": "Done"}
+		],
+		"progress": [
+			{"date": "2026-01-12", "percent_complete": 0.3}
+		]
+	}`
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "PROJ-1.json"), []byte(content), 0o644))
+
+	cfg := testConfig()
+	issues := []jira.Issue{baseIssue("PROJ-1")}
+	require.NoError(t, Apply(dir, issues, cfg))
+
+	// Latest status wins for the Work sheet Status column.
+	assert.Equal(t, "Done", issues[0].GetStatus())
+
+	// Done on 2026-01-25 → 100% from that date (even if earlier percent was lower).
+	pDone, err := issues[0].PercentCompleteOnDate(cfg, parseDate(t, "2026-01-25"))
+	require.NoError(t, err)
+	assert.InDelta(t, 1.0, pDone, 1e-9)
+
+	// Before Done, local percent 0.3 on 01-12 and Jira 0.2 on 01-10 → 0.3 by 01-15.
+	pMid, err := issues[0].PercentCompleteOnDate(cfg, parseDate(t, "2026-01-15"))
+	require.NoError(t, err)
+	assert.InDelta(t, 0.3, pMid, 1e-9)
+
+	// Status history entries present and sorted with other history.
+	require.GreaterOrEqual(t, len(issues[0].Changelog.Histories), 4)
+	for i := 1; i < len(issues[0].Changelog.Histories); i++ {
+		assert.False(t, issues[0].Changelog.Histories[i].CreatedTime.Before(issues[0].Changelog.Histories[i-1].CreatedTime))
+	}
+}
+
 func TestApply_DescriptiveFilenameSuffix(t *testing.T) {
 	dir := t.TempDir()
 	content := `{"summary": "From descriptive name", "size": 8}`

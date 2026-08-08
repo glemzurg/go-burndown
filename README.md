@@ -150,6 +150,20 @@ All fields are optional. **Omitted keys or empty strings leave the Jira value un
       "date": "2026-03-22",
       "percent_complete": 0.75
     }
+  ],
+  "statuses": [
+    {
+      "date": "2026-03-01",
+      "status": "To Do"
+    },
+    {
+      "date": "2026-03-15",
+      "status": "In Progress"
+    },
+    {
+      "date": "2026-04-01",
+      "status": "Done"
+    }
   ]
 }
 ```
@@ -161,15 +175,18 @@ All fields are optional. **Omitted keys or empty strings leave the Jira value un
 | `assignee` | Assignee | Overwrite if non-empty string |
 | `size` | Size | Overwrite when key is present (uses configured `size_field`) |
 | `progress` | weekly % / EV | Each point is **interleaved** into changelog history as an extra percent-complete sample |
+| `statuses` | Status (+ weekly % if done) | Each point is a **timestamped status change** interleaved into changelog history |
 
-### Progress interleaving
+### Progress and status interleaving
 
-- `date` is `YYYY-MM-DD`.
+- `date` is `YYYY-MM-DD` for both `progress` and `statuses`.
 - `percent_complete` is **0.0–1.0** (same scale as the rest of the tool).
-- Local points are appended to the issue’s history and sorted by time with Jira changelog entries.
+- Local progress and status points are appended to the issue’s history and sorted by time with Jira changelog entries.
 - Weekly percent complete still uses the existing rule: the maximum percent known on or before that week’s date (so local and Jira points combine; progress never decreases from a later lower sample).
+- A local status that appears in config `done_statuses` (e.g. `Done`) counts as **100% complete** from that date forward (same as a Jira status change to Done).
+- The Work sheet **Status** column is set to the **latest** overlay status by date when `statuses` is present.
 
-Use overlays when Jira is missing percent-complete history, size is wrong, or you want to record offline progress without editing Jira.
+Use overlays when Jira is missing percent-complete history, size is wrong, or you want to record offline progress and status without editing Jira.
 
 Sample file: `example/overrides/TICKET-1236-Big work stuff.json`.
 

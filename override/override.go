@@ -25,6 +25,9 @@ type IssueFile struct {
 	Size     *float64 `json:"size"`
 	// Progress is interleaved into the issue changelog as percent-complete history.
 	Progress []ProgressPoint `json:"progress"`
+	// Statuses is interleaved into the changelog as status transitions on given dates.
+	// A done status (per config done_statuses) also counts as 100% complete from that date.
+	Statuses []StatusPoint `json:"statuses"`
 }
 
 // ProgressPoint is a known percent complete on a calendar date (YYYY-MM-DD).
@@ -32,6 +35,12 @@ type IssueFile struct {
 type ProgressPoint struct {
 	Date            string  `json:"date"`
 	PercentComplete float64 `json:"percent_complete"`
+}
+
+// StatusPoint is a status value known on a calendar date (YYYY-MM-DD).
+type StatusPoint struct {
+	Date   string `json:"date"`
+	Status string `json:"status"`
 }
 
 // Apply merges local JSON overlays from dir into issues matched by issue key.
@@ -121,6 +130,10 @@ func applyFile(path string, issue *jira.Issue, cfg *config.Config) error {
 	if err := applyProgress(issue, overlay.Progress, cfg); err != nil {
 		return errors.Wrapf(err, "progress in override %s", path)
 	}
+	if err := applyStatuses(issue, overlay.Statuses); err != nil {
+		return errors.Wrapf(err, "statuses in override %s", path)
+	}
+	sortHistories(issue)
 	return nil
 }
 
@@ -144,43 +157,94 @@ func applyFields(issue *jira.Issue, overlay IssueFile, cfg *config.Config) {
 }
 
 func applyProgress(issue *jira.Issue, points []ProgressPoint, cfg *config.Config) error {
-	if len(points) == 0 {
-		return nil
-	}
-
 	for _, point := range points {
-		dateStr := strings.TrimSpace(point.Date)
-		if dateStr == "" {
-			return errors.New("progress entry missing date")
-		}
-		parsed, err := time.ParseInLocation("2006-01-02", dateStr, time.Local)
+		parsed, err := parseOverlayDate(point.Date, "progress")
 		if err != nil {
-			return errors.Wrapf(err, "progress date %q (want YYYY-MM-DD)", dateStr)
+			return err
 		}
 		if point.PercentComplete < 0 || point.PercentComplete > 1 {
-			return errors.Errorf("progress percent_complete %v on %s must be between 0.0 and 1.0", point.PercentComplete, dateStr)
+			return errors.Errorf("progress percent_complete %v on %s must be between 0.0 and 1.0", point.PercentComplete, point.Date)
 		}
 
-		issue.Changelog.Histories = append(issue.Changelog.Histories, jira.History{
-			Created: parsed.Format(jira.JIRARFC3339TimeLayout),
-			Items: []struct {
-				Field      string `json:"field"`
-				Fieldtype  string `json:"fieldtype"`
-				FromString string `json:"fromString"`
-				ToString   string `json:"toString"`
-			}{
-				{
-					Field:     cfg.Jira.PercentCompleteField,
-					Fieldtype: "local",
-					ToString:  strconv.FormatFloat(point.PercentComplete, 'g', -1, 64),
-				},
-			},
-			CreatedTime: parsed,
-		})
+		issue.Changelog.Histories = append(issue.Changelog.Histories, newHistory(
+			parsed,
+			cfg.Jira.PercentCompleteField,
+			"local",
+			strconv.FormatFloat(point.PercentComplete, 'g', -1, 64),
+		))
+	}
+	return nil
+}
+
+func applyStatuses(issue *jira.Issue, points []StatusPoint) error {
+	var latestStatus string
+	var latestTime time.Time
+	haveLatest := false
+
+	for _, point := range points {
+		status := strings.TrimSpace(point.Status)
+		if status == "" {
+			return errors.New("status entry missing status")
+		}
+		parsed, err := parseOverlayDate(point.Date, "status")
+		if err != nil {
+			return err
+		}
+
+		issue.Changelog.Histories = append(issue.Changelog.Histories, newHistory(
+			parsed,
+			"status",
+			"local",
+			status,
+		))
+
+		if !haveLatest || !parsed.Before(latestTime) {
+			latestStatus = status
+			latestTime = parsed
+			haveLatest = true
+		}
 	}
 
+	// Work sheet Status column reflects the latest local status transition when present.
+	if haveLatest {
+		issue.Fields.Status.Name = latestStatus
+	}
+	return nil
+}
+
+func parseOverlayDate(dateStr, kind string) (time.Time, error) {
+	dateStr = strings.TrimSpace(dateStr)
+	if dateStr == "" {
+		return time.Time{}, errors.Errorf("%s entry missing date", kind)
+	}
+	parsed, err := time.ParseInLocation("2006-01-02", dateStr, time.Local)
+	if err != nil {
+		return time.Time{}, errors.Wrapf(err, "%s date %q (want YYYY-MM-DD)", kind, dateStr)
+	}
+	return parsed, nil
+}
+
+func newHistory(when time.Time, field, fieldType, toString string) jira.History {
+	return jira.History{
+		Created: when.Format(jira.JIRARFC3339TimeLayout),
+		Items: []struct {
+			Field      string `json:"field"`
+			Fieldtype  string `json:"fieldtype"`
+			FromString string `json:"fromString"`
+			ToString   string `json:"toString"`
+		}{
+			{
+				Field:     field,
+				Fieldtype: fieldType,
+				ToString:  toString,
+			},
+		},
+		CreatedTime: when,
+	}
+}
+
+func sortHistories(issue *jira.Issue) {
 	sort.Slice(issue.Changelog.Histories, func(i, j int) bool {
 		return issue.Changelog.Histories[i].CreatedTime.Before(issue.Changelog.Histories[j].CreatedTime)
 	})
-	return nil
 }
