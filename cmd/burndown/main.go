@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"time"
 
 	"go-burndown/config"
 	"go-burndown/excel"
@@ -14,11 +15,16 @@ import (
 	"github.com/pkg/errors"
 )
 
+// exampleLookbackWeeks is how far before the last Tuesday the demo project starts.
+// Progress is seeded on each weekly boundary from that start through last Tuesday.
+const exampleLookbackWeeks = 6
+
 func main() {
 	configFile := flag.String("config", "", "Path to configuration file")
 	jql := flag.String("jql", "", "JQL query")
 	outputFile := flag.String("output", "", "Output Excel file")
 	startDate := flag.String("start-date", "", "Project start date (YYYY-MM-DD)")
+	example := flag.Bool("example", false, "Create example spreadsheet with mock data")
 	flag.Parse()
 
 	// Set defaults if flags are empty
@@ -43,6 +49,12 @@ func main() {
 		config.StartDate = *startDate
 	}
 
+	// Example mode owns its timeline: no config start_date required. Start is
+	// six weeks before the last Tuesday on or before now (overridable with --start-date).
+	if *example && *startDate == "" {
+		config.StartDate = exampleStartDate(time.Now()).Format("2006-01-02")
+	}
+
 	// Validate configuration
 	if err := config.Validate(); err != nil {
 		log.Fatalf("Configuration error: %+v", err)
@@ -51,11 +63,23 @@ func main() {
 	// Create context for HTTP requests
 	ctx := context.Background()
 
-	// Query Jira
-	issues, err := jira.QueryJira(ctx, &config)
-	if err != nil {
-		wrappedErr := errors.Wrap(err, "failed to query Jira")
-		log.Fatalf("Jira query error: %+v", wrappedErr)
+	var issues []jira.Issue
+
+	if *example {
+		// Create example data instead of querying Jira
+		var err error
+		issues, err = createExampleIssues(&config)
+		if err != nil {
+			log.Fatalf("Failed to create example issues: %+v", err)
+		}
+	} else {
+		// Query Jira
+		var err error
+		issues, err = jira.QueryJira(ctx, &config)
+		if err != nil {
+			wrappedErr := errors.Wrap(err, "failed to query Jira")
+			log.Fatalf("Jira query error: %+v", wrappedErr)
+		}
 	}
 
 	// Generate Excel report
@@ -66,4 +90,195 @@ func main() {
 	}
 
 	fmt.Printf("Burndown report generated: %s\n", config.OutputFile)
+}
+
+// lastTuesdayOnOrBefore returns the most recent Tuesday on or before now (date only).
+func lastTuesdayOnOrBefore(now time.Time) time.Time {
+	day := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+	offset := (int(day.Weekday()) - int(time.Tuesday) + 7) % 7
+	return day.AddDate(0, 0, -offset)
+}
+
+// exampleStartDate is six weeks before the last Tuesday on or before now.
+func exampleStartDate(now time.Time) time.Time {
+	return lastTuesdayOnOrBefore(now).AddDate(0, 0, -7*exampleLookbackWeeks)
+}
+
+// createExampleIssues builds mock issues with changelog history on each project week
+// so the Work and Projections sheets show realistic % complete and earned value.
+//
+// Progress is week-indexed from config.StartDate across the six-week demo window
+// (seven weekly points: start through last Tuesday inclusive).
+func createExampleIssues(config *config.Config) ([]jira.Issue, error) {
+	startDate, err := time.ParseInLocation("2006-01-02", config.StartDate, time.Local)
+	if err != nil {
+		return nil, errors.Wrapf(err, "invalid start date for example data: %s", config.StartDate)
+	}
+
+	// progressByWeek[i] is percent complete (0.0–1.0) on startDate + i weeks.
+	// Seven samples cover start .. start+6w (last Tuesday when start is computed by exampleStartDate).
+	// Trajectories: gradual finish, early done, slow ramp, big jump, late start, untouched.
+	exampleData := []struct {
+		key            string
+		summary        string
+		issueType      string
+		assignee       string
+		size           float64
+		progressByWeek []float64
+	}{
+		{
+			key:            "TICKET-1234",
+			summary:        "Work stuff",
+			issueType:      "Task",
+			assignee:       "Alice",
+			size:           1,
+			progressByWeek: []float64{0.1, 0.2, 0.4, 0.6, 0.8, 0.9, 1.0},
+		},
+		{
+			key:            "TICKET-1235",
+			summary:        "More work stuff",
+			issueType:      "Bug",
+			assignee:       "Bob",
+			size:           2,
+			progressByWeek: []float64{0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0},
+		},
+		{
+			key:            "TICKET-1236",
+			summary:        "Big work stuff",
+			issueType:      "Story",
+			assignee:       "Carol",
+			size:           3,
+			progressByWeek: []float64{0, 0, 0.1, 0.15, 0.2, 0.25, 0.3},
+		},
+		{
+			key:            "TICKET-1237",
+			summary:        "Tall work stuff",
+			issueType:      "Story",
+			assignee:       "Bob",
+			size:           5,
+			progressByWeek: []float64{0, 0, 0, 0, 1.0, 1.0, 1.0},
+		},
+		{
+			key:            "TICKET-1238",
+			summary:        "Short work stuff",
+			issueType:      "Task",
+			assignee:       "Alice",
+			size:           8,
+			progressByWeek: []float64{0, 0, 0, 0, 0, 0, 0.3},
+		},
+		{
+			key:            "TICKET-1239",
+			summary:        "A big block of work stuff",
+			issueType:      "Epic",
+			assignee:       "Dana",
+			size:           13,
+			progressByWeek: []float64{0, 0, 0, 0, 0, 0, 0},
+		},
+	}
+
+	var issues []jira.Issue
+	now := time.Now()
+
+	for _, data := range exampleData {
+		finalPercent := 0.0
+		if len(data.progressByWeek) > 0 {
+			finalPercent = data.progressByWeek[len(data.progressByWeek)-1]
+		}
+		status := statusForProgress(finalPercent)
+
+		issue := jira.Issue{
+			Key: data.key,
+			Fields: jira.Fields{
+				Summary: data.summary,
+				Status: struct {
+					Name string `json:"name"`
+				}{Name: status},
+				Issuetype: struct {
+					Name string `json:"name"`
+				}{Name: data.issueType},
+				Assignee: struct {
+					DisplayName string `json:"displayName"`
+				}{DisplayName: data.assignee},
+				Created:      startDate.Format("2006-01-02T15:04:05.000-0700"),
+				Updated:      now.Format("2006-01-02T15:04:05.000-0700"),
+				CustomFields: make(map[string]interface{}),
+			},
+			Changelog: struct {
+				Histories []jira.History `json:"histories"`
+			}{},
+		}
+
+		issue.Fields.CustomFields[config.Jira.SizeField] = data.size
+
+		// One changelog entry per week where percent changes, so history-based
+		// weekly columns and velocity projections have real cumulative progress.
+		var histories []jira.History
+		prevPercent := -1.0
+		for weekIndex, percent := range data.progressByWeek {
+			if percent == prevPercent {
+				continue
+			}
+			// Skip pure zeros: blank % cells read as "not started" until first progress.
+			if percent <= 0 && prevPercent < 0 {
+				prevPercent = percent
+				continue
+			}
+
+			weekDate := startDate.AddDate(0, 0, 7*weekIndex)
+			histories = append(histories, jira.History{
+				Created: weekDate.Format(jira.JIRARFC3339TimeLayout),
+				Items: []struct {
+					Field      string `json:"field"`
+					Fieldtype  string `json:"fieldtype"`
+					FromString string `json:"fromString"`
+					ToString   string `json:"toString"`
+				}{
+					{
+						Field:     config.Jira.PercentCompleteField,
+						Fieldtype: "custom",
+						ToString:  fmt.Sprintf("%g", percent),
+					},
+				},
+				CreatedTime: weekDate,
+			})
+			prevPercent = percent
+		}
+
+		// When fully done, record a Done status change so done_statuses also mark 100%.
+		if finalPercent >= 1.0 {
+			doneWeek := startDate.AddDate(0, 0, 7*(len(data.progressByWeek)-1))
+			histories = append(histories, jira.History{
+				Created: doneWeek.Format(jira.JIRARFC3339TimeLayout),
+				Items: []struct {
+					Field      string `json:"field"`
+					Fieldtype  string `json:"fieldtype"`
+					FromString string `json:"fromString"`
+					ToString   string `json:"toString"`
+				}{
+					{
+						Field:     "status",
+						Fieldtype: "jira",
+						ToString:  "Done",
+					},
+				},
+				CreatedTime: doneWeek,
+			})
+		}
+
+		issue.Changelog.Histories = histories
+		issues = append(issues, issue)
+	}
+
+	return issues, nil
+}
+
+func statusForProgress(percent float64) string {
+	switch {
+	case percent >= 1.0:
+		return "Done"
+	case percent > 0:
+		return "In Progress"
+	default:
+		return "To Do"
+	}
 }

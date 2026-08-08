@@ -133,7 +133,7 @@ func GenerateExcelReport(config *config.Config, issues []jira.Issue) error {
 		}
 
 		// Weekly data - loop over reversedWeeks to match header order
-		col := 7 // Start after Size column (F)
+		col := 7 // Start after Size column (F); CoordinatesToCellName supports AA+ columns
 		for _, weekDate := range reversedWeeks {
 			// Get percent complete for this issue at this week date
 			percentComplete, err := issue.PercentCompleteOnDate(config, weekDate)
@@ -143,7 +143,10 @@ func GenerateExcelReport(config *config.Config, issues []jira.Issue) error {
 
 			// Set percent complete value (as fraction for Excel)
 			// Leave field blank is percent complete is zero.
-			percentCell := fmt.Sprintf("%s%d", string(rune('A'+col-1)), rowNum)
+			percentCell, err := excelize.CoordinatesToCellName(col, rowNum)
+			if err != nil {
+				return errors.WithStack(err)
+			}
 			if percentComplete > 0 {
 				if err := f.SetCellValue(workSheet, percentCell, percentComplete); err != nil { // 0.0-1.0
 					return errors.WithStack(err)
@@ -154,7 +157,10 @@ func GenerateExcelReport(config *config.Config, issues []jira.Issue) error {
 			}
 
 			// Earned Value formula: percent * size, blank if percent is zero for easy display.
-			earnedCell := fmt.Sprintf("%s%d", string(rune('A'+col)), rowNum)
+			earnedCell, err := excelize.CoordinatesToCellName(col+1, rowNum)
+			if err != nil {
+				return errors.WithStack(err)
+			}
 			// Find the value in the row that is under the Size column and then multiply that by percent complete.
 			earnedFormula := fmt.Sprintf(`=IF(%s=0, "", %s * HLOOKUP("Size", 1:%d, %d, 0))`, percentCell, percentCell, rowNum, rowNum)
 			if err := f.SetCellFormula(workSheet, earnedCell, earnedFormula); err != nil {
@@ -193,19 +199,19 @@ func GenerateExcelReport(config *config.Config, issues []jira.Issue) error {
 	if err := f.SetCellValue(projectionsSheet, "F1", fmt.Sprintf("StdDev (%dw)", movingAvgWeeks)); err != nil {
 		return errors.WithStack(err)
 	}
-	if err := f.SetCellValue(projectionsSheet, "G1", "Fast (p68)"); err != nil {
+	if err := f.SetCellValue(projectionsSheet, "G1", "Fast (p90)"); err != nil {
 		return errors.WithStack(err)
 	}
 	if err := f.SetCellValue(projectionsSheet, "H1", "Mean"); err != nil {
 		return errors.WithStack(err)
 	}
-	if err := f.SetCellValue(projectionsSheet, "I1", "Slow (p68)"); err != nil {
+	if err := f.SetCellValue(projectionsSheet, "I1", "Slow (p90)"); err != nil {
 		return errors.WithStack(err)
 	}
-	if err := f.SetCellValue(projectionsSheet, "J1", "V. Fast (p68)"); err != nil {
+	if err := f.SetCellValue(projectionsSheet, "J1", "V. Fast (p90)"); err != nil {
 		return errors.WithStack(err)
 	}
-	if err := f.SetCellValue(projectionsSheet, "K1", "V. Slow (p68)"); err != nil {
+	if err := f.SetCellValue(projectionsSheet, "K1", "V. Slow (p90)"); err != nil {
 		return errors.WithStack(err)
 	}
 
@@ -280,7 +286,7 @@ func GenerateExcelReport(config *config.Config, issues []jira.Issue) error {
 				return errors.WithStack(err)
 			}
 
-			// What are the p68 velocity cell names.
+			// What are the 90% velocity cell names.
 			fastVelocityCell := fmt.Sprintf("J%d", rowNum)
 			slowVelocityCell := fmt.Sprintf("K%d", rowNum)
 
@@ -304,9 +310,13 @@ func GenerateExcelReport(config *config.Config, issues []jira.Issue) error {
 				return errors.WithStack(err)
 			}
 
-			// Slow projection).
+			// Slow projection: if the lower CI velocity is <= 0, a finish date is not
+			// meaningful (leave V. Slow as-is; show "unknown" here instead of WORKDAY).
 			slowProjectionCell := fmt.Sprintf("I%d", rowNum)
-			slowProjectionFormula := fmt.Sprintf(`=WORKDAY(%s, CEILING((%s/%s)*5, 1))`, dateCell, remainingCell, slowVelocityCell)
+			slowProjectionFormula := fmt.Sprintf(
+				`=IF(%s<=0,"unknown",WORKDAY(%s,CEILING((%s/%s)*5,1)))`,
+				slowVelocityCell, dateCell, remainingCell, slowVelocityCell,
+			)
 			if err := f.SetCellFormula(projectionsSheet, slowProjectionCell, slowProjectionFormula); err != nil {
 				return errors.WithStack(err)
 			}
@@ -314,8 +324,16 @@ func GenerateExcelReport(config *config.Config, issues []jira.Issue) error {
 				return errors.WithStack(err)
 			}
 
-			// Fast velocity (p68).
-			fastVelocityFormula := fmt.Sprintf(`=%s+(1*%s)`, avgVelocityCell, stdVelocityCell)
+			// Fast / slow velocity bounds (90% CI half-width via t-distribution).
+			//
+			// OpenXML requires the _xlfn. prefix on CONFIDENCE.T or Excel shows #NAME?
+			// and will not compute the cell. Sample size is the velocity COUNT (column D),
+			// not ROWS spanning D:E.
+			sampleSizeExpr := fmt.Sprintf(`MIN(%d,COUNT(%s:%s))`, movingAvgWeeks, firstVelocityCell, velocityCell)
+			fastVelocityFormula := fmt.Sprintf(
+				`=%s+_xlfn.CONFIDENCE.T(0.1,%s,%s)`,
+				avgVelocityCell, stdVelocityCell, sampleSizeExpr,
+			)
 			if err := f.SetCellFormula(projectionsSheet, fastVelocityCell, fastVelocityFormula); err != nil {
 				return errors.WithStack(err)
 			}
@@ -323,8 +341,10 @@ func GenerateExcelReport(config *config.Config, issues []jira.Issue) error {
 				return errors.WithStack(err)
 			}
 
-			// Slow velocity (p68).
-			slowVelocityFormula := fmt.Sprintf(`=%s-(1*%s)`, avgVelocityCell, stdVelocityCell)
+			slowVelocityFormula := fmt.Sprintf(
+				`=%s-_xlfn.CONFIDENCE.T(0.1,%s,%s)`,
+				avgVelocityCell, stdVelocityCell, sampleSizeExpr,
+			)
 			if err := f.SetCellFormula(projectionsSheet, slowVelocityCell, slowVelocityFormula); err != nil {
 				return errors.WithStack(err)
 			}

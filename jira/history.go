@@ -13,8 +13,8 @@ import (
 )
 
 const (
-	//revive:disable:var-naming
-	_JIRA_RFC3339_TIME_LAYOUT = `2006-01-02T15:04:05.000-0700`
+	// JIRARFC3339TimeLayout is the time layout used by Jira for timestamps.
+	JIRARFC3339TimeLayout = `2006-01-02T15:04:05.000-0700`
 )
 
 // History represents a changelog entry in Jira.
@@ -27,26 +27,26 @@ type History struct {
 		ToString   string `json:"toString"`
 	} `json:"items"`
 	// Internal private members.
-	createdTime time.Time
+	CreatedTime time.Time
 }
 
 func (issue *Issue) parseHistoryTimes() (err error) {
 	// Gater updated histories with a parsed times.
 	var updatedHistories []History
 	for _, history := range issue.Changelog.Histories {
-		createdTime, err := time.Parse(_JIRA_RFC3339_TIME_LAYOUT, history.Created)
+		createdTime, err := time.Parse(JIRARFC3339TimeLayout, history.Created)
 		if err != nil {
 			return errors.WithStack(err)
 		}
-		history.createdTime = createdTime
+		history.CreatedTime = createdTime
 		updatedHistories = append(updatedHistories, history)
 	}
 	issue.Changelog.Histories = updatedHistories
 
 	// Ensure the histories are sorted by date.
 	sort.Slice(issue.Changelog.Histories, func(i, j int) bool {
-		timeI := issue.Changelog.Histories[i].createdTime
-		timeJ := issue.Changelog.Histories[j].createdTime
+		timeI := issue.Changelog.Histories[i].CreatedTime
+		timeJ := issue.Changelog.Histories[j].CreatedTime
 		return timeI.Before(timeJ)
 	})
 
@@ -61,7 +61,7 @@ func (issue *Issue) PercentCompleteOnDate(config *config.Config, date time.Time)
 	// To do that we should be less than the moment the next day begins.
 	beginningOfNextDay := date.AddDate(0, 0, 1)
 	for _, history := range issue.Changelog.Histories {
-		historyTime := history.createdTime
+		historyTime := history.CreatedTime
 		if historyTime.Before(beginningOfNextDay) {
 			for _, item := range history.Items {
 				switch item.Field {
