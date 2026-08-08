@@ -12,11 +12,14 @@ import (
 
 // Config holds configuration whats in the burndown and how it generates.
 type Config struct {
-	OutputFile     string     `json:"output_file" validate:"required"`
-	StartDate      string     `json:"start_date" validate:"required,datetime=2006-01-02"`
-	JQL            string     `json:"jql" validate:"required"`
-	MovingAvgWeeks uint       `json:"moving_avg_weeks" validate:"required"`
-	Jira           JiraConfig `json:"jira" validate:"required"`
+	OutputFile     string `json:"output_file" validate:"required"`
+	StartDate      string `json:"start_date" validate:"required,datetime=2006-01-02"`
+	JQL            string `json:"jql" validate:"required"`
+	MovingAvgWeeks uint   `json:"moving_avg_weeks" validate:"required"`
+	// OverridesDir is an optional folder of hand-maintained issue JSON overlays
+	// ({ISSUE_KEY}.json or {ISSUE_KEY}-*.json), applied after Jira fetch and before Excel generation.
+	OverridesDir string     `json:"overrides_dir"`
+	Jira         JiraConfig `json:"jira" validate:"required"`
 }
 
 // JiraConfig holds Jira-specific configuration settings.

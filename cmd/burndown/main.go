@@ -11,6 +11,7 @@ import (
 	"go-burndown/config"
 	"go-burndown/excel"
 	"go-burndown/jira"
+	"go-burndown/override"
 
 	"github.com/pkg/errors"
 )
@@ -24,6 +25,7 @@ func main() {
 	jql := flag.String("jql", "", "JQL query")
 	outputFile := flag.String("output", "", "Output Excel file")
 	startDate := flag.String("start-date", "", "Project start date (YYYY-MM-DD)")
+	overridesDir := flag.String("overrides-dir", "", "Directory of hand-maintained issue overlay JSON files ({KEY}.json or {KEY}-*.json)")
 	example := flag.Bool("example", false, "Create example spreadsheet with mock data (no config file required)")
 	flag.Parse()
 
@@ -38,6 +40,9 @@ func main() {
 		}
 		if *startDate != "" {
 			cfg.StartDate = *startDate
+		}
+		if *overridesDir != "" {
+			cfg.OverridesDir = *overridesDir
 		}
 	} else {
 		configFilePath := *configFile
@@ -59,6 +64,9 @@ func main() {
 		if *startDate != "" {
 			cfg.StartDate = *startDate
 		}
+		if *overridesDir != "" {
+			cfg.OverridesDir = *overridesDir
+		}
 
 		if err := cfg.Validate(); err != nil {
 			log.Fatalf("Configuration error: %+v", err)
@@ -78,6 +86,11 @@ func main() {
 			wrappedErr := errors.Wrap(err, "failed to query Jira")
 			log.Fatalf("Jira query error: %+v", wrappedErr)
 		}
+	}
+
+	// Local hand-maintained files overlay Jira (or example) fields and progress history.
+	if err := override.Apply(cfg.OverridesDir, issues, &cfg); err != nil {
+		log.Fatalf("Local overrides error: %+v", err)
 	}
 
 	if err := excel.GenerateExcelReport(&cfg, issues); err != nil {

@@ -5,6 +5,7 @@ A Go command-line tool that queries Jira for issues and generates an Excel sprea
 ## Features
 
 - **Jira Integration**: Queries Jira using JQL to fetch project issues with full history and changelogs
+- **Local issue overlays**: Optional hand-maintained JSON files per issue key to fill gaps or correct Jira fields and progress history
 - **Issue History Analysis**: Analyzes complete changelog for each issue to track status changes, percent complete updates, and completion dates
 - **Excel Export**: Creates a two-sheet Excel workbook:
   - **Work Sheet**: Lists all Jira tickets with details (key, summary, type, status, assignee, size) and weekly progress data
@@ -36,6 +37,7 @@ Create a `config.json` file or use command-line parameters:
   "start_date": "2025-01-01",
   "jql": "project = \"YOUR_PROJECT\" AND type = Story",
   "moving_avg_weeks": 12,
+  "overrides_dir": "overrides",
   "jira": {
     "jira_url": "https://yourcompany.atlassian.net",
     "username": "your.email@company.com",
@@ -46,6 +48,8 @@ Create a `config.json` file or use command-line parameters:
   }
 }
 ```
+
+`overrides_dir` is optional. When set (or when `--overrides-dir` is passed), local JSON files in that folder are merged after Jira data is loaded.
 
 ### Jira API Token Setup
 
@@ -84,11 +88,17 @@ Writes `burndown.xlsx` by default. Optional overrides:
 
 The demo timeline starts six weeks before the last Tuesday on or before today, with fictional weekly progress history.
 
+You can still apply local overlays in example mode:
+
+```bash
+./build/burndown --example --overrides-dir=example/overrides
+```
+
 ### Command Line Options
 You can override configuration file settings with command-line flags:
 
 ```bash
-./burndown --config="custom.json" --jql="project = MY_PROJECT" --output="report.xlsx" --start-date="2025-01-01"
+./burndown --config="custom.json" --jql="project = MY_PROJECT" --output="report.xlsx" --start-date="2025-01-01" --overrides-dir=overrides
 ```
 
 Available flags:
@@ -96,8 +106,72 @@ Available flags:
 - `--jql`: JQL query to fetch issues (overrides config; unused with `--example`)
 - `--output`: Output Excel file path (overrides config / example default)
 - `--start-date`: Project start date in YYYY-MM-DD format (overrides config / example default)
+- `--overrides-dir`: Folder of hand-maintained issue overlay JSON files (overrides config `overrides_dir`)
 - `--example`: Create example spreadsheet with mock data (no config file or Jira required)
 
+## Pipeline: Jira → local overlays → Excel
+
+Normal generation runs in three steps:
+
+1. **Fetch from Jira** — JQL loads issues with changelog history (percent complete, status, etc.).
+2. **Apply local overlays** — For each issue key, merge any matching files in `overrides_dir` (see naming below).
+3. **Generate Excel** — Build the Work and Projections sheets from the merged issue set.
+
+Example mode skips step 1 (mock issues in process) but still runs step 2 when an overrides directory is set.
+
+### Local overlay files
+
+| Rule | Detail |
+|------|--------|
+| Location | Directory from `overrides_dir` in config or `--overrides-dir` |
+| Filename | `{ISSUE_KEY}.json` **or** `{ISSUE_KEY}-*.json` (optional descriptive suffix after a hyphen) |
+| Examples | `PROJ-123.json`, `PROJ-123-Big Ticket To Do.json`, `TICKET-1236-Big work stuff.json` |
+| Matching | Filename must start with the full issue key; a longer key is not a match (`PROJ-1230.json` does not apply to `PROJ-123`) |
+| Multiple files | If several files match one key, they are applied in sorted filename order |
+| Scope | Only issues already present from Jira (or example data) are updated; orphan JSON files are ignored |
+| Missing file | No change for that issue |
+
+### Overlay JSON shape
+
+All fields are optional. **Omitted keys or empty strings leave the Jira value unchanged.** Present non-empty values overwrite. `size` overwrites when the key is present (including `0`).
+
+```json
+{
+  "summary": "Optional replacement for Summary",
+  "type": "Optional replacement for Type (issue type)",
+  "assignee": "Optional replacement for Assignee display name",
+  "size": 5,
+  "progress": [
+    {
+      "date": "2026-03-15",
+      "percent_complete": 0.4
+    },
+    {
+      "date": "2026-03-22",
+      "percent_complete": 0.75
+    }
+  ]
+}
+```
+
+| Field | Work column | Behavior |
+|-------|-------------|----------|
+| `summary` | Summary | Overwrite if non-empty string |
+| `type` | Type | Overwrite if non-empty string |
+| `assignee` | Assignee | Overwrite if non-empty string |
+| `size` | Size | Overwrite when key is present (uses configured `size_field`) |
+| `progress` | weekly % / EV | Each point is **interleaved** into changelog history as an extra percent-complete sample |
+
+### Progress interleaving
+
+- `date` is `YYYY-MM-DD`.
+- `percent_complete` is **0.0–1.0** (same scale as the rest of the tool).
+- Local points are appended to the issue’s history and sorted by time with Jira changelog entries.
+- Weekly percent complete still uses the existing rule: the maximum percent known on or before that week’s date (so local and Jira points combine; progress never decreases from a later lower sample).
+
+Use overlays when Jira is missing percent-complete history, size is wrong, or you want to record offline progress without editing Jira.
+
+Sample file: `example/overrides/TICKET-1236-Big work stuff.json`.
 
 ## Excel Output
 
@@ -140,7 +214,8 @@ project = "MY_PROJECT" AND type = Story AND assignee in (user1, user2, user3)
 
 ## Notes
 
-- **History-Based Progress**: Percent complete is calculated from Jira changelog history, ensuring accuracy and preventing decreases
+- **History-Based Progress**: Percent complete is calculated from Jira changelog history (plus local overlay progress), ensuring accuracy and preventing decreases
+- **Local overlays**: Optional per-key JSON after Jira fetch; see [Pipeline: Jira → local overlays → Excel](#pipeline-jira--local-overlays--excel)
 - **Configurable Fields**: Size and percent complete fields are configurable custom fields
 - **Done Statuses**: Configurable list of statuses that mark issues as completed
 - **Pagination Support**: Handles large result sets with automatic pagination
