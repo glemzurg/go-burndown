@@ -193,19 +193,19 @@ func GenerateExcelReport(config *config.Config, issues []jira.Issue) error {
 	if err := f.SetCellValue(projectionsSheet, "F1", fmt.Sprintf("StdDev (%dw)", movingAvgWeeks)); err != nil {
 		return errors.WithStack(err)
 	}
-	if err := f.SetCellValue(projectionsSheet, "G1", "Fast (p68)"); err != nil {
+	if err := f.SetCellValue(projectionsSheet, "G1", "Fast (p90)"); err != nil {
 		return errors.WithStack(err)
 	}
 	if err := f.SetCellValue(projectionsSheet, "H1", "Mean"); err != nil {
 		return errors.WithStack(err)
 	}
-	if err := f.SetCellValue(projectionsSheet, "I1", "Slow (p68)"); err != nil {
+	if err := f.SetCellValue(projectionsSheet, "I1", "Slow (p90)"); err != nil {
 		return errors.WithStack(err)
 	}
-	if err := f.SetCellValue(projectionsSheet, "J1", "V. Fast (p68)"); err != nil {
+	if err := f.SetCellValue(projectionsSheet, "J1", "V. Fast (p90)"); err != nil {
 		return errors.WithStack(err)
 	}
-	if err := f.SetCellValue(projectionsSheet, "K1", "V. Slow (p68)"); err != nil {
+	if err := f.SetCellValue(projectionsSheet, "K1", "V. Slow (p90)"); err != nil {
 		return errors.WithStack(err)
 	}
 
@@ -280,7 +280,7 @@ func GenerateExcelReport(config *config.Config, issues []jira.Issue) error {
 				return errors.WithStack(err)
 			}
 
-			// What are the p68 velocity cell names.
+			// What are the 90% velocity cell names.
 			fastVelocityCell := fmt.Sprintf("J%d", rowNum)
 			slowVelocityCell := fmt.Sprintf("K%d", rowNum)
 
@@ -314,8 +314,8 @@ func GenerateExcelReport(config *config.Config, issues []jira.Issue) error {
 				return errors.WithStack(err)
 			}
 
-			// Fast velocity (p68).
-			fastVelocityFormula := fmt.Sprintf(`=%s+(1*%s)`, avgVelocityCell, stdVelocityCell)
+			// Fast velocity (90%).
+			fastVelocityFormula := fmt.Sprintf(`=%s + CONFIDENCE.T(0.10, %s, MIN(%d, ROWS(%s:%s)))`, avgVelocityCell, stdVelocityCell, movingAvgWeeks, firstVelocityCell, avgVelocityCell)
 			if err := f.SetCellFormula(projectionsSheet, fastVelocityCell, fastVelocityFormula); err != nil {
 				return errors.WithStack(err)
 			}
@@ -323,8 +323,8 @@ func GenerateExcelReport(config *config.Config, issues []jira.Issue) error {
 				return errors.WithStack(err)
 			}
 
-			// Slow velocity (p68).
-			slowVelocityFormula := fmt.Sprintf(`=%s-(1*%s)`, avgVelocityCell, stdVelocityCell)
+			// Slow velocity (90%).
+			slowVelocityFormula := fmt.Sprintf(`=%s - CONFIDENCE.T(0.10, %s, MIN(%d, ROWS(%s:%s)))`, avgVelocityCell, stdVelocityCell, movingAvgWeeks, firstVelocityCell, avgVelocityCell)
 			if err := f.SetCellFormula(projectionsSheet, slowVelocityCell, slowVelocityFormula); err != nil {
 				return errors.WithStack(err)
 			}
