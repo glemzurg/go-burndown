@@ -53,3 +53,15 @@ func TestExampleStartDate(t *testing.T) {
 	assert.Equal(t, time.Date(2026, 6, 23, 0, 0, 0, 0, time.UTC), got)
 	assert.Equal(t, 6*7, int(lastTuesdayOnOrBefore(now).Sub(got).Hours()/24))
 }
+
+func TestExampleBaseConfigIsSelfContained(t *testing.T) {
+	now := time.Date(2026, 8, 8, 12, 0, 0, 0, time.UTC)
+	cfg := exampleBaseConfig(now)
+	require.NoError(t, cfg.Validate())
+	assert.Equal(t, "burndown.xlsx", cfg.OutputFile)
+	assert.Equal(t, exampleStartDate(now).Format("2006-01-02"), cfg.StartDate)
+
+	issues, err := createExampleIssues(&cfg)
+	require.NoError(t, err)
+	require.NotEmpty(t, issues)
+}

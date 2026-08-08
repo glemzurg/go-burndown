@@ -11,6 +11,7 @@ import (
 	"go-burndown/config"
 	"go-burndown/excel"
 	"go-burndown/jira"
+	"go-burndown/override"
 
 	"github.com/pkg/errors"
 )
@@ -24,72 +25,113 @@ func main() {
 	jql := flag.String("jql", "", "JQL query")
 	outputFile := flag.String("output", "", "Output Excel file")
 	startDate := flag.String("start-date", "", "Project start date (YYYY-MM-DD)")
-	example := flag.Bool("example", false, "Create example spreadsheet with mock data")
+	overridesDir := flag.String("overrides-dir", "", "Directory of hand-maintained issue overlay JSON files ({KEY}.json or {KEY}-*.json)")
+	example := flag.Bool("example", false, "Create example spreadsheet with mock data (no config file or Jira required)")
+	fromOverrides := flag.Bool("from-overrides", false, "Load issues only from overrides-dir (no Jira; file names supply issue keys)")
 	flag.Parse()
 
-	// Set defaults if flags are empty
-	configFilePath := *configFile
-	if configFilePath == "" {
-		configFilePath = "config.json"
+	if *example && *fromOverrides {
+		log.Fatal("use only one of --example or --from-overrides")
 	}
 
-	config, err := config.LoadConfig(configFilePath)
-	if err != nil {
-		log.Fatalf("Config loading error: %+v", err)
-	}
-
-	// Override config with command line flags if provided
-	if *jql != "" {
-		config.JQL = *jql
-	}
-	if *outputFile != "" {
-		config.OutputFile = *outputFile
-	}
-	if *startDate != "" {
-		config.StartDate = *startDate
-	}
-
-	// Example mode owns its timeline: no config start_date required. Start is
-	// six weeks before the last Tuesday on or before now (overridable with --start-date).
-	if *example && *startDate == "" {
-		config.StartDate = exampleStartDate(time.Now()).Format("2006-01-02")
-	}
-
-	// Validate configuration
-	if err := config.Validate(); err != nil {
-		log.Fatalf("Configuration error: %+v", err)
-	}
-
-	// Create context for HTTP requests
-	ctx := context.Background()
-
+	var cfg config.Config
+	var err error
 	var issues []jira.Issue
 
-	if *example {
-		// Create example data instead of querying Jira
-		var err error
-		issues, err = createExampleIssues(&config)
+	switch {
+	case *example:
+		// Demo mode: no config file; built-in mock tickets; optional overlays on top.
+		cfg = exampleBaseConfig(time.Now())
+		applyCommonFlags(&cfg, outputFile, startDate, overridesDir)
+		issues, err = createExampleIssues(&cfg)
 		if err != nil {
 			log.Fatalf("Failed to create example issues: %+v", err)
 		}
-	} else {
-		// Query Jira
-		var err error
-		issues, err = jira.QueryJira(ctx, &config)
+		if err := override.Apply(cfg.OverridesDir, issues, &cfg); err != nil {
+			log.Fatalf("Local overrides error: %+v", err)
+		}
+
+	case *fromOverrides:
+		// Overrides-only mode: config required; issues load from overrides_dir; no Jira API.
+		cfg, err = loadConfigFile(*configFile)
+		if err != nil {
+			log.Fatalf("Config loading error: %+v", err)
+		}
+		applyCommonFlags(&cfg, outputFile, startDate, overridesDir)
+		if err := cfg.ValidateFromOverrides(); err != nil {
+			log.Fatalf("Configuration error: %+v", err)
+		}
+		issues, err = override.LoadAll(cfg.OverridesDir, &cfg)
+		if err != nil {
+			log.Fatalf("Load overrides error: %+v", err)
+		}
+
+	default:
+		// Jira mode: config required; query Jira, then optional local overlays.
+		cfg, err = loadConfigFile(*configFile)
+		if err != nil {
+			log.Fatalf("Config loading error: %+v", err)
+		}
+		if *jql != "" {
+			cfg.JQL = *jql
+		}
+		applyCommonFlags(&cfg, outputFile, startDate, overridesDir)
+		if err := cfg.Validate(); err != nil {
+			log.Fatalf("Configuration error: %+v", err)
+		}
+		issues, err = jira.QueryJira(context.Background(), &cfg)
 		if err != nil {
 			wrappedErr := errors.Wrap(err, "failed to query Jira")
 			log.Fatalf("Jira query error: %+v", wrappedErr)
 		}
+		if err := override.Apply(cfg.OverridesDir, issues, &cfg); err != nil {
+			log.Fatalf("Local overrides error: %+v", err)
+		}
 	}
 
-	// Generate Excel report
-	err = excel.GenerateExcelReport(&config, issues)
-	if err != nil {
+	if err := excel.GenerateExcelReport(&cfg, issues); err != nil {
 		wrappedErr := errors.Wrap(err, "failed to generate Excel report")
 		log.Fatalf("Excel generation error: %+v", wrappedErr)
 	}
 
-	fmt.Printf("Burndown report generated: %s\n", config.OutputFile)
+	fmt.Printf("Burndown report generated: %s\n", cfg.OutputFile)
+}
+
+func loadConfigFile(configPath string) (config.Config, error) {
+	if configPath == "" {
+		configPath = "config.json"
+	}
+	return config.LoadConfig(configPath)
+}
+
+func applyCommonFlags(cfg *config.Config, outputFile, startDate, overridesDir *string) {
+	if *outputFile != "" {
+		cfg.OutputFile = *outputFile
+	}
+	if *startDate != "" {
+		cfg.StartDate = *startDate
+	}
+	if *overridesDir != "" {
+		cfg.OverridesDir = *overridesDir
+	}
+}
+
+// exampleBaseConfig is used only for --example (no config file or Jira).
+func exampleBaseConfig(now time.Time) config.Config {
+	return config.Config{
+		OutputFile:     "burndown.xlsx",
+		StartDate:      exampleStartDate(now).Format("2006-01-02"),
+		JQL:            "example",
+		MovingAvgWeeks: 3,
+		Jira: config.JiraConfig{
+			JiraURL:              "https://example.atlassian.net",
+			Username:             "example@example.com",
+			APIToken:             "example",
+			SizeField:            "customfield_10028",
+			PercentCompleteField: "Percentage Complete",
+			DoneStatuses:         []string{"Done", "Closed", "Resolved", "Complete", "Completed"},
+		},
+	}
 }
 
 // lastTuesdayOnOrBefore returns the most recent Tuesday on or before now (date only).

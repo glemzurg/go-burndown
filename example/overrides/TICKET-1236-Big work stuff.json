@@ -1,0 +1,34 @@
+{
+  "summary": "Big work stuff (local note)",
+  "type": "Investigation",
+  "assignee": "Carol (local)",
+  "size": 32,
+  "progress": [
+    {
+      "date": "2026-06-30",
+      "percent_complete": 0.1
+    },
+    {
+      "date": "2026-07-14",
+      "percent_complete": 0.3
+    },
+    {
+      "date": "2026-07-28",
+      "percent_complete": 0.6
+    }
+  ],
+  "statuses": [
+    {
+      "date": "2026-06-23",
+      "status": "To Do"
+    },
+    {
+      "date": "2026-06-30",
+      "status": "In Progress"
+    },
+    {
+      "date": "2026-07-28",
+      "status": "Blocked"
+    }
+  ]
+}
