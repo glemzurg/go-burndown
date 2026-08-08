@@ -133,7 +133,7 @@ func GenerateExcelReport(config *config.Config, issues []jira.Issue) error {
 		}
 
 		// Weekly data - loop over reversedWeeks to match header order
-		col := 7 // Start after Size column (F)
+		col := 7 // Start after Size column (F); CoordinatesToCellName supports AA+ columns
 		for _, weekDate := range reversedWeeks {
 			// Get percent complete for this issue at this week date
 			percentComplete, err := issue.PercentCompleteOnDate(config, weekDate)
@@ -143,7 +143,10 @@ func GenerateExcelReport(config *config.Config, issues []jira.Issue) error {
 
 			// Set percent complete value (as fraction for Excel)
 			// Leave field blank is percent complete is zero.
-			percentCell := fmt.Sprintf("%s%d", string(rune('A'+col-1)), rowNum)
+			percentCell, err := excelize.CoordinatesToCellName(col, rowNum)
+			if err != nil {
+				return errors.WithStack(err)
+			}
 			if percentComplete > 0 {
 				if err := f.SetCellValue(workSheet, percentCell, percentComplete); err != nil { // 0.0-1.0
 					return errors.WithStack(err)
@@ -154,7 +157,10 @@ func GenerateExcelReport(config *config.Config, issues []jira.Issue) error {
 			}
 
 			// Earned Value formula: percent * size, blank if percent is zero for easy display.
-			earnedCell := fmt.Sprintf("%s%d", string(rune('A'+col)), rowNum)
+			earnedCell, err := excelize.CoordinatesToCellName(col+1, rowNum)
+			if err != nil {
+				return errors.WithStack(err)
+			}
 			// Find the value in the row that is under the Size column and then multiply that by percent complete.
 			earnedFormula := fmt.Sprintf(`=IF(%s=0, "", %s * HLOOKUP("Size", 1:%d, %d, 0))`, percentCell, percentCell, rowNum, rowNum)
 			if err := f.SetCellFormula(workSheet, earnedCell, earnedFormula); err != nil {

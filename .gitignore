@@ -39,3 +39,6 @@ build/
 
 # Ignore macOS system files
 .DS_Store
+
+# Test builds.
+burndown.xlsx
