@@ -320,8 +320,16 @@ func GenerateExcelReport(config *config.Config, issues []jira.Issue) error {
 				return errors.WithStack(err)
 			}
 
-			// Fast velocity (90%).
-			fastVelocityFormula := fmt.Sprintf(`=%s + CONFIDENCE.T(0.10, %s, MIN(%d, ROWS(%s:%s)))`, avgVelocityCell, stdVelocityCell, movingAvgWeeks, firstVelocityCell, avgVelocityCell)
+			// Fast / slow velocity bounds (90% CI half-width via t-distribution).
+			//
+			// OpenXML requires the _xlfn. prefix on CONFIDENCE.T or Excel shows #NAME?
+			// and will not compute the cell. Sample size is the velocity COUNT (column D),
+			// not ROWS spanning D:E.
+			sampleSizeExpr := fmt.Sprintf(`MIN(%d,COUNT(%s:%s))`, movingAvgWeeks, firstVelocityCell, velocityCell)
+			fastVelocityFormula := fmt.Sprintf(
+				`=%s+_xlfn.CONFIDENCE.T(0.1,%s,%s)`,
+				avgVelocityCell, stdVelocityCell, sampleSizeExpr,
+			)
 			if err := f.SetCellFormula(projectionsSheet, fastVelocityCell, fastVelocityFormula); err != nil {
 				return errors.WithStack(err)
 			}
@@ -329,8 +337,10 @@ func GenerateExcelReport(config *config.Config, issues []jira.Issue) error {
 				return errors.WithStack(err)
 			}
 
-			// Slow velocity (90%).
-			slowVelocityFormula := fmt.Sprintf(`=%s - CONFIDENCE.T(0.10, %s, MIN(%d, ROWS(%s:%s)))`, avgVelocityCell, stdVelocityCell, movingAvgWeeks, firstVelocityCell, avgVelocityCell)
+			slowVelocityFormula := fmt.Sprintf(
+				`=%s-_xlfn.CONFIDENCE.T(0.1,%s,%s)`,
+				avgVelocityCell, stdVelocityCell, sampleSizeExpr,
+			)
 			if err := f.SetCellFormula(projectionsSheet, slowVelocityCell, slowVelocityFormula); err != nil {
 				return errors.WithStack(err)
 			}
