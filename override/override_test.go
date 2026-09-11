@@ -231,18 +231,19 @@ func TestApply_DoesNotMatchLongerIssueKeyPrefix(t *testing.T) {
 }
 
 func TestMatchesIssueOverrideFile(t *testing.T) {
+	const issueKey = "PROJ-123"
 	tests := []struct {
 		name     string
 		issueKey string
 		want     bool
 	}{
-		{name: "PROJ-123.json", issueKey: "PROJ-123", want: true},
-		{name: "PROJ-123-Big Ticket To Do.json", issueKey: "PROJ-123", want: true},
-		{name: "PROJ-123-notes.json", issueKey: "PROJ-123", want: true},
-		{name: "PROJ-1230.json", issueKey: "PROJ-123", want: false},
-		{name: "PROJ-12.json", issueKey: "PROJ-123", want: false},
-		{name: "PROJ-123.txt", issueKey: "PROJ-123", want: false},
-		{name: "other.json", issueKey: "PROJ-123", want: false},
+		{name: "PROJ-123.json", issueKey: issueKey, want: true},
+		{name: "PROJ-123-Big Ticket To Do.json", issueKey: issueKey, want: true},
+		{name: "PROJ-123-notes.json", issueKey: issueKey, want: true},
+		{name: "PROJ-1230.json", issueKey: issueKey, want: false},
+		{name: "PROJ-12.json", issueKey: issueKey, want: false},
+		{name: "PROJ-123.txt", issueKey: issueKey, want: false},
+		{name: "other.json", issueKey: issueKey, want: false},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

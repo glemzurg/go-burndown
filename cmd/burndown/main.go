@@ -16,9 +16,14 @@ import (
 	"github.com/pkg/errors"
 )
 
-// exampleLookbackWeeks is how far before the last Tuesday the demo project starts.
-// Progress is seeded on each weekly boundary from that start through last Tuesday.
-const exampleLookbackWeeks = 6
+const (
+	// exampleLookbackWeeks is how far before the last Tuesday the demo project starts.
+	// Progress is seeded on each weekly boundary from that start through last Tuesday.
+	exampleLookbackWeeks = 6
+	defaultBurndownFile  = "burndown.xlsx"
+	defaultBurnupFile    = "burnup.xlsx"
+	doneStatus           = "Done"
+)
 
 func main() {
 	configFile := flag.String("config", "", "Path to configuration file")
@@ -26,12 +31,18 @@ func main() {
 	outputFile := flag.String("output", "", "Output Excel file")
 	startDate := flag.String("start-date", "", "Project start date (YYYY-MM-DD)")
 	overridesDir := flag.String("overrides-dir", "", "Directory of hand-maintained issue overlay JSON files ({KEY}.json or {KEY}-*.json)")
+	reportType := flag.String("report-type", "", "Report type: burndown (default) or burnup")
 	example := flag.Bool("example", false, "Create example spreadsheet with mock data (no config file or Jira required)")
 	fromOverrides := flag.Bool("from-overrides", false, "Load issues only from overrides-dir (no Jira; file names supply issue keys)")
 	flag.Parse()
 
 	if *example && *fromOverrides {
 		log.Fatal("use only one of --example or --from-overrides")
+	}
+	if *reportType != "" {
+		if _, err := config.NormalizeReportType(*reportType); err != nil {
+			log.Fatalf("Configuration error: %+v", err)
+		}
 	}
 
 	var cfg config.Config
@@ -41,8 +52,8 @@ func main() {
 	switch {
 	case *example:
 		// Demo mode: no config file; built-in mock tickets; optional overlays on top.
-		cfg = exampleBaseConfig(time.Now())
-		applyCommonFlags(&cfg, outputFile, startDate, overridesDir)
+		cfg = exampleBaseConfig(time.Now(), *reportType)
+		applyCommonFlags(&cfg, outputFile, startDate, overridesDir, reportType)
 		issues, err = createExampleIssues(&cfg)
 		if err != nil {
 			log.Fatalf("Failed to create example issues: %+v", err)
@@ -57,7 +68,7 @@ func main() {
 		if err != nil {
 			log.Fatalf("Config loading error: %+v", err)
 		}
-		applyCommonFlags(&cfg, outputFile, startDate, overridesDir)
+		applyCommonFlags(&cfg, outputFile, startDate, overridesDir, reportType)
 		if err := cfg.ValidateFromOverrides(); err != nil {
 			log.Fatalf("Configuration error: %+v", err)
 		}
@@ -75,7 +86,7 @@ func main() {
 		if *jql != "" {
 			cfg.JQL = *jql
 		}
-		applyCommonFlags(&cfg, outputFile, startDate, overridesDir)
+		applyCommonFlags(&cfg, outputFile, startDate, overridesDir, reportType)
 		if err := cfg.Validate(); err != nil {
 			log.Fatalf("Configuration error: %+v", err)
 		}
@@ -94,7 +105,11 @@ func main() {
 		log.Fatalf("Excel generation error: %+v", wrappedErr)
 	}
 
-	fmt.Printf("Burndown report generated: %s\n", cfg.OutputFile)
+	kind := "Burndown"
+	if cfg.IsBurnup() {
+		kind = "Burnup"
+	}
+	fmt.Printf("%s report generated: %s\n", kind, cfg.OutputFile)
 }
 
 func loadConfigFile(configPath string) (config.Config, error) {
@@ -104,7 +119,7 @@ func loadConfigFile(configPath string) (config.Config, error) {
 	return config.LoadConfig(configPath)
 }
 
-func applyCommonFlags(cfg *config.Config, outputFile, startDate, overridesDir *string) {
+func applyCommonFlags(cfg *config.Config, outputFile, startDate, overridesDir, reportType *string) {
 	if *outputFile != "" {
 		cfg.OutputFile = *outputFile
 	}
@@ -114,22 +129,31 @@ func applyCommonFlags(cfg *config.Config, outputFile, startDate, overridesDir *s
 	if *overridesDir != "" {
 		cfg.OverridesDir = *overridesDir
 	}
+	if *reportType != "" {
+		cfg.ReportType = *reportType
+	}
 }
 
 // exampleBaseConfig is used only for --example (no config file or Jira).
-func exampleBaseConfig(now time.Time) config.Config {
+func exampleBaseConfig(now time.Time, reportType string) config.Config {
+	normalized, _ := config.NormalizeReportType(reportType)
+	outputFile := defaultBurndownFile
+	if normalized == config.ReportTypeBurnup {
+		outputFile = defaultBurnupFile
+	}
 	return config.Config{
-		OutputFile:     "burndown.xlsx",
+		OutputFile:     outputFile,
 		StartDate:      exampleStartDate(now).Format("2006-01-02"),
 		JQL:            "example",
 		MovingAvgWeeks: 3,
+		ReportType:     normalized,
 		Jira: config.JiraConfig{
 			JiraURL:              "https://example.atlassian.net",
 			Username:             "example@example.com",
 			APIToken:             "example",
 			SizeField:            "customfield_10028",
 			PercentCompleteField: "Percentage Complete",
-			DoneStatuses:         []string{"Done", "Closed", "Resolved", "Complete", "Completed"},
+			DoneStatuses:         []string{doneStatus, "Closed", "Resolved", "Complete", "Completed"},
 		},
 	}
 }
@@ -305,7 +329,7 @@ func createExampleIssues(config *config.Config) ([]jira.Issue, error) {
 					{
 						Field:     "status",
 						Fieldtype: "jira",
-						ToString:  "Done",
+						ToString:  doneStatus,
 					},
 				},
 				CreatedTime: doneWeek,
@@ -322,7 +346,7 @@ func createExampleIssues(config *config.Config) ([]jira.Issue, error) {
 func statusForProgress(percent float64) string {
 	switch {
 	case percent >= 1.0:
-		return "Done"
+		return doneStatus
 	case percent > 0:
 		return "In Progress"
 	default:

@@ -14,8 +14,6 @@ import (
 
 // GenerateExcelReport creates an Excel report from Jira issues and saves it to a file.
 func GenerateExcelReport(config *config.Config, issues []jira.Issue) error {
-	movingAvgWeeks := config.MovingAvgWeeks
-
 	// Create a new Excel file
 	f := excelize.NewFile()
 
@@ -174,184 +172,8 @@ func GenerateExcelReport(config *config.Config, issues []jira.Issue) error {
 		}
 	}
 
-	// Create Projections sheet
-	projectionsSheet := "Projections"
-	if _, err := f.NewSheet(projectionsSheet); err != nil {
-		return errors.WithStack(err)
-	}
-
-	// Headers for projections sheet
-	if err := f.SetCellValue(projectionsSheet, "A1", "Date"); err != nil {
-		return errors.WithStack(err)
-	}
-	if err := f.SetCellValue(projectionsSheet, "B1", "Completed"); err != nil {
-		return errors.WithStack(err)
-	}
-	if err := f.SetCellValue(projectionsSheet, "C1", "Remaining"); err != nil {
-		return errors.WithStack(err)
-	}
-	if err := f.SetCellValue(projectionsSheet, "D1", "Velocity"); err != nil {
-		return errors.WithStack(err)
-	}
-	if err := f.SetCellValue(projectionsSheet, "E1", fmt.Sprintf("Avg (%dw)", movingAvgWeeks)); err != nil {
-		return errors.WithStack(err)
-	}
-	if err := f.SetCellValue(projectionsSheet, "F1", fmt.Sprintf("StdDev (%dw)", movingAvgWeeks)); err != nil {
-		return errors.WithStack(err)
-	}
-	if err := f.SetCellValue(projectionsSheet, "G1", "Fast (p90)"); err != nil {
-		return errors.WithStack(err)
-	}
-	if err := f.SetCellValue(projectionsSheet, "H1", "Mean"); err != nil {
-		return errors.WithStack(err)
-	}
-	if err := f.SetCellValue(projectionsSheet, "I1", "Slow (p90)"); err != nil {
-		return errors.WithStack(err)
-	}
-	if err := f.SetCellValue(projectionsSheet, "J1", "V. Fast (p90)"); err != nil {
-		return errors.WithStack(err)
-	}
-	if err := f.SetCellValue(projectionsSheet, "K1", "V. Slow (p90)"); err != nil {
-		return errors.WithStack(err)
-	}
-
-	// Add projection data - one row per week
-	for weekIndex, weekDate := range weeks {
-		rowNum := weekIndex + 2
-
-		// Set the date
-		dateCell := fmt.Sprintf("A%d", rowNum)
-		if err := f.SetCellValue(projectionsSheet, dateCell, weekDate.Format("2006-01-02")); err != nil {
-			return errors.WithStack(err)
-		}
-
-		// The work completed.
-		completedCell := fmt.Sprintf("B%d", rowNum)
-		completedFormula := fmt.Sprintf(`=SUM(INDEX(Work!$2:$10000, , MATCH("EV "&TEXT(%s,"mm-dd"), Work!$1:$1, 0)))`, dateCell)
-		if err := f.SetCellFormula(projectionsSheet, completedCell, completedFormula); err != nil {
-			return errors.WithStack(err)
-		}
-		if err := f.SetCellStyle(projectionsSheet, completedCell, completedCell, numStyleID); err != nil {
-			return errors.WithStack(err)
-		}
-
-		// The remaining work.
-		remainingCell := fmt.Sprintf("C%d", rowNum)
-		remainingFormula := fmt.Sprintf(`=SUM(INDEX(Work!$2:$10000, , MATCH("Size", Work!$1:$1, 0)))-%s`, completedCell)
-		if err := f.SetCellFormula(projectionsSheet, remainingCell, remainingFormula); err != nil {
-			return errors.WithStack(err)
-		}
-		if err := f.SetCellStyle(projectionsSheet, remainingCell, remainingCell, numStyleID); err != nil {
-			return errors.WithStack(err)
-		}
-
-		// We can only compute velocity if we're not the first data cell (need two data entries.)
-		velocityCell := fmt.Sprintf("D%d", rowNum)
-		firstVelocityCell := "D$3" // The cell where the first velocity is found.
-		if weekIndex > 0 {
-			// The velocity computation.
-			priorCompletedCell := fmt.Sprintf("B%d", rowNum-1)
-			velocityFormula := fmt.Sprintf(`=%s-%s`, completedCell, priorCompletedCell)
-			if err := f.SetCellFormula(projectionsSheet, velocityCell, velocityFormula); err != nil {
-				return errors.WithStack(err)
-			}
-			if err := f.SetCellStyle(projectionsSheet, velocityCell, velocityCell, numStyleID); err != nil {
-				return errors.WithStack(err)
-			}
-		}
-
-		// Moving average velocity computation.
-		// We need at least two velocities.
-		avgVelocityCell := fmt.Sprintf("E%d", rowNum)
-		if weekIndex > 1 {
-			// The average velocity computation.
-			avgVelocityFormula := fmt.Sprintf(`=AVERAGE(OFFSET(%s, -1 * (MIN(COUNT(%s:%s),%d) -1), 0, MIN(COUNT(%s:%s),%d), 1))`, velocityCell, firstVelocityCell, velocityCell, movingAvgWeeks, firstVelocityCell, velocityCell, movingAvgWeeks)
-			if err := f.SetCellFormula(projectionsSheet, avgVelocityCell, avgVelocityFormula); err != nil {
-				return errors.WithStack(err)
-			}
-			if err := f.SetCellStyle(projectionsSheet, avgVelocityCell, avgVelocityCell, numStyleID); err != nil {
-				return errors.WithStack(err)
-			}
-		}
-
-		// All other computations require at least two average velocities.
-		if weekIndex > 2 {
-			// Standard deviation (of velocities).
-			stdVelocityCell := fmt.Sprintf("F%d", rowNum)
-			stdVelocityFormula := fmt.Sprintf(`=STDEV(OFFSET(%s, -1 * (MIN(COUNT(%s:%s),%d) -1), 0, MIN(COUNT(%s:%s),%d), 1))`, velocityCell, firstVelocityCell, velocityCell, movingAvgWeeks, firstVelocityCell, velocityCell, movingAvgWeeks)
-			if err := f.SetCellFormula(projectionsSheet, stdVelocityCell, stdVelocityFormula); err != nil {
-				return errors.WithStack(err)
-			}
-			if err := f.SetCellStyle(projectionsSheet, stdVelocityCell, stdVelocityCell, numStyleID); err != nil {
-				return errors.WithStack(err)
-			}
-
-			// What are the 90% velocity cell names.
-			fastVelocityCell := fmt.Sprintf("J%d", rowNum)
-			slowVelocityCell := fmt.Sprintf("K%d", rowNum)
-
-			// Fast projection.
-			fastProjectionCell := fmt.Sprintf("G%d", rowNum)
-			fastProjectionFormula := fmt.Sprintf(`=WORKDAY(%s, CEILING((%s/%s)*5, 1))`, dateCell, remainingCell, fastVelocityCell)
-			if err := f.SetCellFormula(projectionsSheet, fastProjectionCell, fastProjectionFormula); err != nil {
-				return errors.WithStack(err)
-			}
-			if err := f.SetCellStyle(projectionsSheet, fastProjectionCell, fastProjectionCell, dateStyleID); err != nil {
-				return errors.WithStack(err)
-			}
-
-			// Mean projection.
-			meanProjectionCell := fmt.Sprintf("H%d", rowNum)
-			meanProjectionFormula := fmt.Sprintf(`=WORKDAY(%s, CEILING((%s/%s)*5, 1))`, dateCell, remainingCell, avgVelocityCell)
-			if err := f.SetCellFormula(projectionsSheet, meanProjectionCell, meanProjectionFormula); err != nil {
-				return errors.WithStack(err)
-			}
-			if err := f.SetCellStyle(projectionsSheet, meanProjectionCell, meanProjectionCell, dateStyleID); err != nil {
-				return errors.WithStack(err)
-			}
-
-			// Slow projection: if the lower CI velocity is <= 0, a finish date is not
-			// meaningful (leave V. Slow as-is; show "unknown" here instead of WORKDAY).
-			slowProjectionCell := fmt.Sprintf("I%d", rowNum)
-			slowProjectionFormula := fmt.Sprintf(
-				`=IF(%s<=0,"unknown",WORKDAY(%s,CEILING((%s/%s)*5,1)))`,
-				slowVelocityCell, dateCell, remainingCell, slowVelocityCell,
-			)
-			if err := f.SetCellFormula(projectionsSheet, slowProjectionCell, slowProjectionFormula); err != nil {
-				return errors.WithStack(err)
-			}
-			if err := f.SetCellStyle(projectionsSheet, slowProjectionCell, slowProjectionCell, dateStyleID); err != nil {
-				return errors.WithStack(err)
-			}
-
-			// Fast / slow velocity bounds (90% CI half-width via t-distribution).
-			//
-			// OpenXML requires the _xlfn. prefix on CONFIDENCE.T or Excel shows #NAME?
-			// and will not compute the cell. Sample size is the velocity COUNT (column D),
-			// not ROWS spanning D:E.
-			sampleSizeExpr := fmt.Sprintf(`MIN(%d,COUNT(%s:%s))`, movingAvgWeeks, firstVelocityCell, velocityCell)
-			fastVelocityFormula := fmt.Sprintf(
-				`=%s+_xlfn.CONFIDENCE.T(0.1,%s,%s)`,
-				avgVelocityCell, stdVelocityCell, sampleSizeExpr,
-			)
-			if err := f.SetCellFormula(projectionsSheet, fastVelocityCell, fastVelocityFormula); err != nil {
-				return errors.WithStack(err)
-			}
-			if err := f.SetCellStyle(projectionsSheet, fastVelocityCell, fastVelocityCell, numStyleID); err != nil {
-				return errors.WithStack(err)
-			}
-
-			slowVelocityFormula := fmt.Sprintf(
-				`=%s-_xlfn.CONFIDENCE.T(0.1,%s,%s)`,
-				avgVelocityCell, stdVelocityCell, sampleSizeExpr,
-			)
-			if err := f.SetCellFormula(projectionsSheet, slowVelocityCell, slowVelocityFormula); err != nil {
-				return errors.WithStack(err)
-			}
-			if err := f.SetCellStyle(projectionsSheet, slowVelocityCell, slowVelocityCell, numStyleID); err != nil {
-				return errors.WithStack(err)
-			}
-		}
+	if err := writeProjectionsSheet(f, config, weeks, numStyleID, dateStyleID); err != nil {
+		return err
 	}
 
 	// Remove the default sheet
@@ -367,5 +189,327 @@ func GenerateExcelReport(config *config.Config, issues []jira.Issue) error {
 		return errors.WithStack(err)
 	}
 
+	return nil
+}
+
+const (
+	sheetProjections = "Projections"
+	headerDate       = "Date"
+	headerCompleted  = "Completed"
+	headerRemaining  = "Remaining"
+	headerVelocity   = "Velocity"
+	headerDiff       = "Diff"
+	headerMean       = "Mean"
+)
+
+// projectionCols is 1-based Excel column numbers for the Projections sheet.
+// Remaining and forecast columns are 0 when the report is a burnup.
+type projectionCols struct {
+	date, completed, remaining, velocity, avg, diff int
+	std, fast, mean, slow, vFast, vSlow             int
+}
+
+func newProjectionCols(burnup bool) projectionCols {
+	if burnup {
+		// Remaining is omitted; Velocity and Avg shift left; Diff replaces forecasts.
+		return projectionCols{
+			date:      1,
+			completed: 2,
+			velocity:  3,
+			avg:       4,
+			diff:      5,
+		}
+	}
+	return projectionCols{
+		date:      1,
+		completed: 2,
+		remaining: 3,
+		velocity:  4,
+		avg:       5,
+		std:       6,
+		fast:      7,
+		mean:      8,
+		slow:      9,
+		vFast:     10,
+		vSlow:     11,
+	}
+}
+
+func writeProjectionsSheet(f *excelize.File, cfg *config.Config, weeks []time.Time, numStyleID, dateStyleID int) error {
+	if _, err := f.NewSheet(sheetProjections); err != nil {
+		return errors.WithStack(err)
+	}
+
+	burnup := cfg.IsBurnup()
+	cols := newProjectionCols(burnup)
+	movingAvgWeeks := cfg.MovingAvgWeeks
+
+	if err := writeProjectionHeaders(f, cols, burnup, movingAvgWeeks); err != nil {
+		return err
+	}
+
+	signedFmt := "+0.0;-0.0;0.0"
+	signedStyleID, err := f.NewStyle(&excelize.Style{CustomNumFmt: &signedFmt})
+	if err != nil {
+		return err
+	}
+
+	velocityName, err := excelize.ColumnNumberToName(cols.velocity)
+	if err != nil {
+		return errors.WithStack(err)
+	}
+	// First velocity is the second week (row 3); OFFSET windows start there.
+	firstVelocityCell := fmt.Sprintf("%s$3", velocityName)
+
+	for weekIndex, weekDate := range weeks {
+		rowNum := weekIndex + 2
+		if err := writeProjectionRow(f, projectionRowArgs{
+			cols:              cols,
+			burnup:            burnup,
+			weekIndex:         weekIndex,
+			rowNum:            rowNum,
+			weekDate:          weekDate,
+			movingAvgWeeks:    movingAvgWeeks,
+			firstVelocityCell: firstVelocityCell,
+			numStyleID:        numStyleID,
+			dateStyleID:       dateStyleID,
+			signedStyleID:     signedStyleID,
+		}); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func writeProjectionHeaders(f *excelize.File, cols projectionCols, burnup bool, movingAvgWeeks uint) error {
+	if err := setHeader(f, cols.date, headerDate); err != nil {
+		return err
+	}
+	if err := setHeader(f, cols.completed, headerCompleted); err != nil {
+		return err
+	}
+	if !burnup {
+		if err := setHeader(f, cols.remaining, headerRemaining); err != nil {
+			return err
+		}
+	}
+	if err := setHeader(f, cols.velocity, headerVelocity); err != nil {
+		return err
+	}
+	if err := setHeader(f, cols.avg, fmt.Sprintf("Avg (%dw)", movingAvgWeeks)); err != nil {
+		return err
+	}
+	if burnup {
+		return setHeader(f, cols.diff, fmt.Sprintf("%s (%dw)", headerDiff, movingAvgWeeks))
+	}
+	if err := setHeader(f, cols.std, fmt.Sprintf("StdDev (%dw)", movingAvgWeeks)); err != nil {
+		return err
+	}
+	if err := setHeader(f, cols.fast, "Fast (p90)"); err != nil {
+		return err
+	}
+	if err := setHeader(f, cols.mean, headerMean); err != nil {
+		return err
+	}
+	if err := setHeader(f, cols.slow, "Slow (p90)"); err != nil {
+		return err
+	}
+	if err := setHeader(f, cols.vFast, "V. Fast (p90)"); err != nil {
+		return err
+	}
+	return setHeader(f, cols.vSlow, "V. Slow (p90)")
+}
+
+func setHeader(f *excelize.File, col int, value string) error {
+	cell, err := excelize.CoordinatesToCellName(col, 1)
+	if err != nil {
+		return errors.WithStack(err)
+	}
+	if err := f.SetCellValue(sheetProjections, cell, value); err != nil {
+		return errors.WithStack(err)
+	}
+	return nil
+}
+
+type projectionRowArgs struct {
+	cols              projectionCols
+	burnup            bool
+	weekIndex         int
+	rowNum            int
+	weekDate          time.Time
+	movingAvgWeeks    uint
+	firstVelocityCell string
+	numStyleID        int
+	dateStyleID       int
+	signedStyleID     int
+}
+
+func writeProjectionRow(f *excelize.File, args projectionRowArgs) error {
+	dateCell, err := excelize.CoordinatesToCellName(args.cols.date, args.rowNum)
+	if err != nil {
+		return errors.WithStack(err)
+	}
+	if err := f.SetCellValue(sheetProjections, dateCell, args.weekDate.Format("2006-01-02")); err != nil {
+		return errors.WithStack(err)
+	}
+
+	completedCell, err := excelize.CoordinatesToCellName(args.cols.completed, args.rowNum)
+	if err != nil {
+		return errors.WithStack(err)
+	}
+	completedFormula := fmt.Sprintf(`=SUM(INDEX(Work!$2:$10000, , MATCH("EV "&TEXT(%s,"mm-dd"), Work!$1:$1, 0)))`, dateCell)
+	if err := setStyledFormula(f, completedCell, completedFormula, args.numStyleID); err != nil {
+		return err
+	}
+
+	if !args.burnup {
+		remainingCell, err := excelize.CoordinatesToCellName(args.cols.remaining, args.rowNum)
+		if err != nil {
+			return errors.WithStack(err)
+		}
+		remainingFormula := fmt.Sprintf(`=SUM(INDEX(Work!$2:$10000, , MATCH("Size", Work!$1:$1, 0)))-%s`, completedCell)
+		if err := setStyledFormula(f, remainingCell, remainingFormula, args.numStyleID); err != nil {
+			return err
+		}
+	}
+
+	velocityCell, err := excelize.CoordinatesToCellName(args.cols.velocity, args.rowNum)
+	if err != nil {
+		return errors.WithStack(err)
+	}
+	if args.weekIndex > 0 {
+		priorCompletedCell, err := excelize.CoordinatesToCellName(args.cols.completed, args.rowNum-1)
+		if err != nil {
+			return errors.WithStack(err)
+		}
+		velocityFormula := fmt.Sprintf(`=%s-%s`, completedCell, priorCompletedCell)
+		if err := setStyledFormula(f, velocityCell, velocityFormula, args.numStyleID); err != nil {
+			return err
+		}
+	}
+
+	avgVelocityCell, err := excelize.CoordinatesToCellName(args.cols.avg, args.rowNum)
+	if err != nil {
+		return errors.WithStack(err)
+	}
+	if args.weekIndex > 1 {
+		avgVelocityFormula := fmt.Sprintf(
+			`=AVERAGE(OFFSET(%s, -1 * (MIN(COUNT(%s:%s),%d) -1), 0, MIN(COUNT(%s:%s),%d), 1))`,
+			velocityCell, args.firstVelocityCell, velocityCell, args.movingAvgWeeks, args.firstVelocityCell, velocityCell, args.movingAvgWeeks,
+		)
+		if err := setStyledFormula(f, avgVelocityCell, avgVelocityFormula, args.numStyleID); err != nil {
+			return err
+		}
+	}
+
+	if args.burnup {
+		return writeBurnupDiff(f, args, velocityCell, avgVelocityCell)
+	}
+	return writeBurndownForecasts(f, args, dateCell, velocityCell, avgVelocityCell)
+}
+
+func writeBurnupDiff(f *excelize.File, args projectionRowArgs, velocityCell, avgVelocityCell string) error {
+	if args.weekIndex <= 1 {
+		return nil
+	}
+	diffCell, err := excelize.CoordinatesToCellName(args.cols.diff, args.rowNum)
+	if err != nil {
+		return errors.WithStack(err)
+	}
+	// Positive Diff means this week was faster than the moving average.
+	diffFormula := fmt.Sprintf(`=%s-%s`, velocityCell, avgVelocityCell)
+	return setStyledFormula(f, diffCell, diffFormula, args.signedStyleID)
+}
+
+func writeBurndownForecasts(f *excelize.File, args projectionRowArgs, dateCell, velocityCell, avgVelocityCell string) error {
+	if args.weekIndex <= 2 {
+		return nil
+	}
+
+	remainingCell, err := excelize.CoordinatesToCellName(args.cols.remaining, args.rowNum)
+	if err != nil {
+		return errors.WithStack(err)
+	}
+	stdVelocityCell, err := excelize.CoordinatesToCellName(args.cols.std, args.rowNum)
+	if err != nil {
+		return errors.WithStack(err)
+	}
+	stdVelocityFormula := fmt.Sprintf(
+		`=STDEV(OFFSET(%s, -1 * (MIN(COUNT(%s:%s),%d) -1), 0, MIN(COUNT(%s:%s),%d), 1))`,
+		velocityCell, args.firstVelocityCell, velocityCell, args.movingAvgWeeks, args.firstVelocityCell, velocityCell, args.movingAvgWeeks,
+	)
+	if err := setStyledFormula(f, stdVelocityCell, stdVelocityFormula, args.numStyleID); err != nil {
+		return err
+	}
+
+	fastVelocityCell, err := excelize.CoordinatesToCellName(args.cols.vFast, args.rowNum)
+	if err != nil {
+		return errors.WithStack(err)
+	}
+	slowVelocityCell, err := excelize.CoordinatesToCellName(args.cols.vSlow, args.rowNum)
+	if err != nil {
+		return errors.WithStack(err)
+	}
+
+	fastProjectionCell, err := excelize.CoordinatesToCellName(args.cols.fast, args.rowNum)
+	if err != nil {
+		return errors.WithStack(err)
+	}
+	fastProjectionFormula := fmt.Sprintf(`=WORKDAY(%s, CEILING((%s/%s)*5, 1))`, dateCell, remainingCell, fastVelocityCell)
+	if err := setStyledFormula(f, fastProjectionCell, fastProjectionFormula, args.dateStyleID); err != nil {
+		return err
+	}
+
+	meanProjectionCell, err := excelize.CoordinatesToCellName(args.cols.mean, args.rowNum)
+	if err != nil {
+		return errors.WithStack(err)
+	}
+	meanProjectionFormula := fmt.Sprintf(`=WORKDAY(%s, CEILING((%s/%s)*5, 1))`, dateCell, remainingCell, avgVelocityCell)
+	if err := setStyledFormula(f, meanProjectionCell, meanProjectionFormula, args.dateStyleID); err != nil {
+		return err
+	}
+
+	// Slow projection: if the lower CI velocity is <= 0, a finish date is not
+	// meaningful (leave V. Slow as-is; show "unknown" here instead of WORKDAY).
+	slowProjectionCell, err := excelize.CoordinatesToCellName(args.cols.slow, args.rowNum)
+	if err != nil {
+		return errors.WithStack(err)
+	}
+	slowProjectionFormula := fmt.Sprintf(
+		`=IF(%s<=0,"unknown",WORKDAY(%s,CEILING((%s/%s)*5,1)))`,
+		slowVelocityCell, dateCell, remainingCell, slowVelocityCell,
+	)
+	if err := setStyledFormula(f, slowProjectionCell, slowProjectionFormula, args.dateStyleID); err != nil {
+		return err
+	}
+
+	// Fast / slow velocity bounds (90% CI half-width via t-distribution).
+	//
+	// OpenXML requires the _xlfn. prefix on CONFIDENCE.T or Excel shows #NAME?
+	// and will not compute the cell. Sample size is the velocity COUNT, not ROWS.
+	sampleSizeExpr := fmt.Sprintf(`MIN(%d,COUNT(%s:%s))`, args.movingAvgWeeks, args.firstVelocityCell, velocityCell)
+	fastVelocityFormula := fmt.Sprintf(
+		`=%s+_xlfn.CONFIDENCE.T(0.1,%s,%s)`,
+		avgVelocityCell, stdVelocityCell, sampleSizeExpr,
+	)
+	if err := setStyledFormula(f, fastVelocityCell, fastVelocityFormula, args.numStyleID); err != nil {
+		return err
+	}
+
+	slowVelocityFormula := fmt.Sprintf(
+		`=%s-_xlfn.CONFIDENCE.T(0.1,%s,%s)`,
+		avgVelocityCell, stdVelocityCell, sampleSizeExpr,
+	)
+	return setStyledFormula(f, slowVelocityCell, slowVelocityFormula, args.numStyleID)
+}
+
+func setStyledFormula(f *excelize.File, cell, formula string, styleID int) error {
+	if err := f.SetCellFormula(sheetProjections, cell, formula); err != nil {
+		return errors.WithStack(err)
+	}
+	if err := f.SetCellStyle(sheetProjections, cell, cell, styleID); err != nil {
+		return errors.WithStack(err)
+	}
 	return nil
 }

@@ -1,6 +1,6 @@
 # Jira Burndown Report Generator
 
-A Go command-line tool that queries Jira for issues and generates an Excel spreadsheet with burndown charts, earned value calculations, and project completion projections.
+A Go command-line tool that queries Jira for issues and generates an Excel spreadsheet with earned value calculations. **Burndown** (default) forecasts a completion date from velocity. **Burnup** skips date forecasts and gamifies weekly velocity against the moving average.
 
 ## Features
 
@@ -9,10 +9,11 @@ A Go command-line tool that queries Jira for issues and generates an Excel sprea
 - **Issue History Analysis**: Analyzes complete changelog for each issue to track status changes, percent complete updates, and completion dates
 - **Excel Export**: Creates a two-sheet Excel workbook:
   - **Work Sheet**: Lists all Jira tickets with details (key, summary, type, status, assignee, size) and weekly progress data
-  - **Projections Sheet**: Shows weekly burndown progress with earned value, velocity calculations, and completion date projections
+  - **Projections Sheet**: Weekly earned value and velocity. Burndown adds remaining work and completion-date forecasts; burnup adds a Diff column (this week's velocity minus the moving average)
 - **Accurate Progress Tracking**: Calculates percent complete based on configurable fields and history, with non-decreasing progress
 - **Flexible Configuration**: Supports configuration files with optional command-line overrides
-- **Project Completion Forecasting**: Predicts completion dates using moving averages and statistical projections
+- **Project Completion Forecasting**: Burndown predicts completion dates using moving averages and statistical projections
+- **Velocity scoreboard (burnup)**: Compares each week's velocity to the moving average instead of projecting a finish date
 
 ## Installation
 
@@ -37,6 +38,7 @@ Create a `config.json` file or use command-line parameters:
   "start_date": "2025-01-01",
   "jql": "project = \"YOUR_PROJECT\" AND type = Story",
   "moving_avg_weeks": 12,
+  "report_type": "burndown",
   "overrides_dir": "overrides",
   "jira": {
     "jira_url": "https://yourcompany.atlassian.net",
@@ -51,6 +53,8 @@ Create a `config.json` file or use command-line parameters:
 
 `overrides_dir` is optional. When set (or when `--overrides-dir` is passed), local JSON files in that folder are merged after Jira data is loaded.
 
+`report_type` is optional and defaults to `burndown`. Set it to `burnup` to skip completion-date forecasts and show a velocity Diff column instead.
+
 ### Jira API Token Setup
 
 1. Go to your Jira account settings
@@ -60,7 +64,7 @@ Create a `config.json` file or use command-line parameters:
 
 ## Usage
 
-There are **three ways** to generate a burndown:
+There are **three ways** to generate a report (burndown or burnup):
 
 | Mode | Flag(s) | Config file? | Data source | Jira API? |
 |------|---------|--------------|-------------|-----------|
@@ -99,6 +103,7 @@ Built-in mock project data — **no config file**, no Jira:
 ./build/burndown --example
 ./build/burndown --example --output=demo.xlsx --start-date=2026-01-06
 ./build/burndown --example --overrides-dir=example/overrides
+./build/burndown --example --report-type=burnup
 ```
 
 The demo timeline starts six weeks before the last Tuesday on or before today, with fictional weekly progress history.
@@ -117,6 +122,7 @@ Available flags:
 - `--overrides-dir`: Folder of issue JSON files (overlay in Jira/example modes; **source of truth** with `--from-overrides`)
 - `--from-overrides`: Load issues only from `overrides_dir` (config required; no Jira API)
 - `--example`: Built-in mock data (no config file or Jira; mutually exclusive with `--from-overrides`)
+- `--report-type`: `burndown` (default) or `burnup`. Example mode writes `burndown.xlsx` or `burnup.xlsx` unless `--output` is set
 
 ## Pipelines
 
@@ -206,6 +212,8 @@ Use overlays when Jira is missing percent-complete history, size is wrong, or yo
 
 Sample file: `example/overrides/TICKET-1236-Big work stuff.json`.
 
+Example workbooks: `example/burndown.xlsx` (date forecasts) and `example/burnup.xlsx` (velocity Diff scoreboard). Generate them with `--example` and `--example --report-type=burnup`.
+
 ## Excel Output
 
 ### Work Sheet
@@ -219,15 +227,23 @@ Contains one row per Jira issue with columns:
 - Weekly progress data: % Complete and Earned Value for each week (newest to oldest)
 
 ### Projections Sheet
-Shows weekly project progress and forecasts with columns:
+
+**Burndown** (`report_type` omitted or `burndown`) forecasts a finish date:
 - Date
 - Completed (cumulative earned value)
 - Remaining (total size minus completed)
 - Velocity (weekly earned value)
 - Avg (12w) (moving average velocity)
 - StdDev (12w) (standard deviation of velocity)
-- Fast (p68), Mean, Slow (p68) (projected completion dates based on velocity percentiles)
-- V. Fast (p68), V. Slow (p68) (standard deviation computations)
+- Fast (p90), Mean, Slow (p90) (projected completion dates based on velocity percentiles)
+- V. Fast (p90), V. Slow (p90) (90% confidence velocity bounds)
+
+**Burnup** (`report_type`: `burnup`) does not project a date. Remaining, StdDev, and the forecast columns are omitted. Diff is this week's velocity minus the moving average (positive means faster than average):
+- Date
+- Completed (cumulative earned value)
+- Velocity (weekly earned value)
+- Avg (12w) (moving average velocity)
+- Diff (12w) (Velocity − Avg for that week)
 
 ## JQL Examples
 
@@ -254,7 +270,7 @@ project = "MY_PROJECT" AND type = Story AND assignee in (user1, user2, user3)
 - **Pagination Support**: Handles large result sets with automatic pagination
 - **Rate Limiting**: 1-second delays between API requests to respect Jira rate limits
 - **Weekly Reporting**: Progress is tracked and projected on a weekly basis
-- **Statistical Projections**: Uses moving averages and standard deviations for completion forecasts
+- **Statistical Projections**: Burndown uses moving averages and standard deviations for completion forecasts; burnup uses the same average to score weekly velocity
 
 ## Dependencies
 

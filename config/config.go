@@ -5,9 +5,16 @@ import (
 	"encoding/json"
 	"os"
 	"slices"
+	"strings"
 
 	"github.com/go-playground/validator/v10"
 	"github.com/pkg/errors"
+)
+
+// Report types written to the Excel Projections sheet.
+const (
+	ReportTypeBurndown = "burndown"
+	ReportTypeBurnup   = "burnup"
 )
 
 // Config holds configuration whats in the burndown and how it generates.
@@ -16,6 +23,9 @@ type Config struct {
 	StartDate      string `json:"start_date" validate:"required,datetime=2006-01-02"`
 	JQL            string `json:"jql" validate:"required"`
 	MovingAvgWeeks uint   `json:"moving_avg_weeks" validate:"required"`
+	// ReportType selects the Projections sheet: "burndown" (default) forecasts a
+	// finish date; "burnup" gamifies weekly velocity instead of projecting dates.
+	ReportType string `json:"report_type"`
 	// OverridesDir is an optional folder of hand-maintained issue JSON overlays
 	// ({ISSUE_KEY}.json or {ISSUE_KEY}-*.json), applied after Jira fetch and before Excel generation.
 	OverridesDir string     `json:"overrides_dir"`
@@ -57,6 +67,9 @@ func (c *Config) Validate() error {
 	if err != nil {
 		return errors.WithStack(err)
 	}
+	if err := c.validateReportType(); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -89,7 +102,42 @@ func (c *Config) ValidateFromOverrides() error {
 	if len(c.Jira.DoneStatuses) == 0 {
 		return errors.New("jira.done_statuses is required")
 	}
+	if err := c.validateReportType(); err != nil {
+		return err
+	}
 	return nil
+}
+
+// NormalizeReportType maps empty/whitespace to burndown and lowercases the value.
+func NormalizeReportType(reportType string) (string, error) {
+	normalized := strings.ToLower(strings.TrimSpace(reportType))
+	switch normalized {
+	case "", ReportTypeBurndown:
+		return ReportTypeBurndown, nil
+	case ReportTypeBurnup:
+		return ReportTypeBurnup, nil
+	default:
+		return "", errors.Errorf("report_type must be %q or %q", ReportTypeBurndown, ReportTypeBurnup)
+	}
+}
+
+func (c *Config) validateReportType() error {
+	_, err := NormalizeReportType(c.ReportType)
+	return err
+}
+
+// EffectiveReportType is burndown unless report_type is burnup.
+func (c *Config) EffectiveReportType() string {
+	normalized, err := NormalizeReportType(c.ReportType)
+	if err != nil {
+		return ReportTypeBurndown
+	}
+	return normalized
+}
+
+// IsBurnup reports whether Projections should gamify velocity instead of forecasting dates.
+func (c *Config) IsBurnup() bool {
+	return c.EffectiveReportType() == ReportTypeBurnup
 }
 
 // TicketUrl creates the URL to a specific ticket.

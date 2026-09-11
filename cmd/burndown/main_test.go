@@ -6,6 +6,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"go-burndown/config"
 )
 
 func TestLastTuesdayOnOrBefore(t *testing.T) {
@@ -56,11 +58,28 @@ func TestExampleStartDate(t *testing.T) {
 
 func TestExampleBaseConfigIsSelfContained(t *testing.T) {
 	now := time.Date(2026, 8, 8, 12, 0, 0, 0, time.UTC)
-	cfg := exampleBaseConfig(now)
-	require.NoError(t, cfg.Validate())
-	assert.Equal(t, "burndown.xlsx", cfg.OutputFile)
-	assert.Equal(t, exampleStartDate(now).Format("2006-01-02"), cfg.StartDate)
+	tests := []struct {
+		name       string
+		reportType string
+		outputFile string
+		wantType   string
+	}{
+		{name: "default report", reportType: "", outputFile: defaultBurndownFile, wantType: config.ReportTypeBurndown},
+		{name: "explicit date forecast", reportType: config.ReportTypeBurndown, outputFile: defaultBurndownFile, wantType: config.ReportTypeBurndown},
+		{name: "velocity scoreboard", reportType: config.ReportTypeBurnup, outputFile: defaultBurnupFile, wantType: config.ReportTypeBurnup},
+		{name: "velocity scoreboard mixed case", reportType: "Burnup", outputFile: defaultBurnupFile, wantType: config.ReportTypeBurnup},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := exampleBaseConfig(now, tc.reportType)
+			require.NoError(t, cfg.Validate())
+			assert.Equal(t, tc.outputFile, cfg.OutputFile)
+			assert.Equal(t, tc.wantType, cfg.EffectiveReportType())
+			assert.Equal(t, exampleStartDate(now).Format("2006-01-02"), cfg.StartDate)
+		})
+	}
 
+	cfg := exampleBaseConfig(now, "")
 	issues, err := createExampleIssues(&cfg)
 	require.NoError(t, err)
 	require.NotEmpty(t, issues)

@@ -3,6 +3,7 @@
   "output_file": "burndown.xlsx",
   "start_date": "2025-01-01",
   "moving_avg_weeks": 12,
+  "report_type": "burndown",
   "overrides_dir": "overrides",
   "jira": {
     "jira_url": "https://yourcompany.atlassian.net",
