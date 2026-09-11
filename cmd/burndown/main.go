@@ -22,7 +22,6 @@ const (
 	exampleLookbackWeeks = 6
 	defaultBurndownFile  = "burndown.xlsx"
 	defaultBurnupFile    = "burnup.xlsx"
-	doneStatus           = "Done"
 )
 
 func main() {
@@ -153,7 +152,7 @@ func exampleBaseConfig(now time.Time, reportType string) config.Config {
 			APIToken:             "example",
 			SizeField:            "customfield_10028",
 			PercentCompleteField: "Percentage Complete",
-			DoneStatuses:         []string{doneStatus, "Closed", "Resolved", "Complete", "Completed"},
+			DoneStatuses:         []string{"Done", "Closed", "Resolved", "Complete", "Completed"},
 		},
 	}
 }
@@ -329,7 +328,7 @@ func createExampleIssues(config *config.Config) ([]jira.Issue, error) {
 					{
 						Field:     "status",
 						Fieldtype: "jira",
-						ToString:  doneStatus,
+						ToString:  "Done",
 					},
 				},
 				CreatedTime: doneWeek,
@@ -346,7 +345,7 @@ func createExampleIssues(config *config.Config) ([]jira.Issue, error) {
 func statusForProgress(percent float64) string {
 	switch {
 	case percent >= 1.0:
-		return doneStatus
+		return "Done"
 	case percent > 0:
 		return "In Progress"
 	default:
